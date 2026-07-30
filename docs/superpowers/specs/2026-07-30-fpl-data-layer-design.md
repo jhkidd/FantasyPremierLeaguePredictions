@@ -66,6 +66,8 @@ These were verified during design and are load-bearing. They are recorded becaus
 | FPL prices change nightly at approximately 01:30–02:30 UK time. | The daily snapshot must run after that window. |
 | From 2026/27, FPL locks a gameweek's points at 09:00 UK the day after its last match. | Facts for a gameweek are only final after that lock. |
 | Fixture counts are not stable more than ~3 gameweeks ahead; doubles and blanks are confirmed 2–6 weeks out. | The features layer must express fixture count as uncertain beyond a short horizon. |
+| **OpenFPL** (arXiv:2508.09992, 2025) matched the commercial FPL Review Massive Data Model on hauler RMSE (5.142 vs 5.172) using **only the FPL API and Understat**. | Strong evidence that the Tier 1 + Tier 2 source set is sufficient to reach state-of-the-art on public data. Paid odds feeds are not a prerequisite. |
+| Manager picks are **not retained by FPL across seasons**, and no public archive reconstructs them. | Effective ownership is the one dataset in this design that cannot be backfilled. Capture must begin at gameweek 1 (see §6.1). |
 
 ---
 
@@ -142,16 +144,20 @@ data/
     fpl/fixtures/season=2026-27/as_of=.../
     fpl/event_live/season=2026-27/event=1/as_of=.../
     fpl/element_summary/season=2026-27/as_of=.../
-    vaastav/ understat/ clubelo/ footballdata/
+    fpl/league_standings/season=2026-27/event=1/as_of=.../
+    fpl/entry_picks/season=2026-27/event=1/as_of=.../
+    vaastav/ understat/ clubelo/ footballdata/ cupfixtures/
 
   staged/
     players/ teams/ fixtures/
     player_fixture_stats/
     price_snapshots/ availability_snapshots/
+    manager_picks/
 
   facts/
     player_fixture/season=2026-27/part.parquet
     team_fixture/
+    effective_ownership/season=2026-27/
     points/rules=2026-27/
 
   crosswalk/
@@ -190,15 +196,37 @@ models/
 **Tier 1 — required**
 
 - **FPL API** (`fantasy.premierleague.com/api/`): `bootstrap-static`, `fixtures`, `event/{gw}/live`, `element-summary/{id}`. The only source of FPL prices, ownership, availability news and defensive-contribution stats. Undocumented and unversioned; no auth needed for the endpoints used. Politeness: 2–5s between requests.
+- **FPL API manager endpoints**: `leagues-classic/314/standings`, `entry/{id}/`, `entry/{id}/event/{gw}/picks/`. Used to derive effective ownership — see §6.1. Public and unauthenticated.
 - **`vaastav/Fantasy-Premier-League`**: historical backfill for 2016/17–2025/26. Backfill only.
 
 **Tier 2 — included**
 
-- **Understat** (via `understatapi`): shot-level xG/xA, EPL from 2014/15. No defensive stats.
+- **Understat** (via `understatapi`): shot-level xG/xA. **All six covered leagues, not just the Premier League** — EPL, La Liga, Bundesliga, Serie A, Ligue 1, RFPL, from 2014/15. Pulling the others costs little and gives summer signings an xG/xA prior instead of making them cold-start unknowns, which matters most in exactly the early gameweeks where everyone else is guessing. No defensive stats.
 - **Club Elo** (`api.clubelo.com`): free REST team strength ratings, continuously updated.
 - **football-data.co.uk**: results and bookmaker odds, free CSV.
+- **Non-league fixture congestion**: UEFA Champions League / Europa League / Conference League, FA Cup and EFL Cup schedules, from a free source such as openfootball or the api-football free tier. Not available from any other source in scope. Congestion is the main driver of rotation, and rotation is the main source of minutes uncertainty for the expensive assets where minutes matter most.
 
-**Tier 3 — deferred**, behind the same connector interface: scraped predicted lineups (Fantasy Football Scout, Drafthound), paid odds APIs.
+**Tier 3 — deferred**, behind the same connector interface: scraped predicted lineups (Fantasy Football Scout, Drafthound), set-piece and penalty-taker designations, forward-looking double/blank gameweek forecasts, paid player-level odds APIs.
+
+### 6.1 Effective ownership — and why it cannot wait
+
+Research into how consistently high-ranking managers actually reason established that **rank optimisation is not expected-points maximisation**. What matters is a player's *effective ownership* among rivals:
+
+```
+EO% = ownership% + captaincy% + (2 × triple-captaincy%)
+```
+
+A high-EV player that almost everyone owns and captains protects rank but cannot gain it; rank is gained by differentials, and lost by them too. Optimising raw expected points while ignoring EO produces systematic over-differentiation and unstable rank. Global ownership from `bootstrap-static` is not a substitute — it is diluted by millions of dormant teams and carries no captaincy information at all.
+
+**This dataset is use-it-or-lose-it.** FPL does not retain manager picks across seasons: once 2026/27 ends, its picks are gone, and no public archive reconstructs them. Unlike every other source in this design, effective ownership **cannot be backfilled**. If capture does not begin at gameweek 1, neither EO features nor any backtest of rank-optimised decisions is possible for that season.
+
+**Capture design.** Immediately after each deadline, page through the overall league (`leagues-classic/314/standings`, 50 entries per page) to collect the top 1,000 entry IDs, then fetch `entry/{id}/event/{gw}/picks/` for each. Roughly 1,020 requests at 2s spacing — about 35 minutes, once per gameweek. Picks are captured *after the deadline but before matches*, so the recorded captain and starting XI reflect the manager's actual decision rather than the post-hoc result of automatic substitutions.
+
+Top-1,000 is a deliberate approximation of the top-10k benchmark that community tools use: it is an order of magnitude cheaper and its bias is known and consistent, which is what matters for a feature used comparatively.
+
+Staged output is one row per (gameweek, entry, player) with captain and vice-captain flags, from which EO per player per gameweek aggregates directly.
+
+> **Verification status.** `entry/{id}/` and `entry/{id}/history/` were confirmed public and unauthenticated during design. `entry/{id}/event/{gw}/picks/` could not be verified because the 2026/27 season had not started and no prior-season picks are retained. It is public in the current season — this is how community ownership tools operate — but the connector must be tested against a live gameweek at the first opportunity.
 
 ### Identity resolution
 
@@ -230,7 +258,8 @@ Two kinds of time exist in the facts layer, and `as_of` filters both.
 | `daily-snapshot` | 03:30 UTC daily | Runs after FPL's nightly price run. Pulls `bootstrap-static` and `fixtures` — two requests. Captures prices, ownership, injury news, status. |
 | `post-gameweek` | 09:30 UTC daily | FPL finalises a gameweek at 09:00 UK the day after its last match. Checks whether a gameweek just locked; if so pulls `event/{gw}/live` (all players, one request), rebuilds facts, and reconciles derived points against FPL's. Once models exist it also appends predicted-vs-realised to `monitoring/`; until then that step is inert. Exits in seconds otherwise. |
 | `pre-deadline` | Hourly, Thu–Sun | Reads the real deadline from `events` and no-ops unless within the window. Refreshes availability. Once models exist it runs inference and publishes predictions; until then it publishes `status.json` only. Cron cannot express "90 minutes before a moving kickoff", so the job decides. |
-| `weekly-context` | Mondays | Understat, Club Elo, football-data.co.uk. Slower-moving sources. |
+| `capture-ownership` | Hourly, Sat–Sun | Fires once per gameweek, after that gameweek's deadline has passed and before its first kickoff. Collects the top 1,000 overall entries and their picks (§6.1). ~35 minutes. **The one job that cannot be missed** — the data it captures is unrecoverable afterwards. Failure raises an issue immediately rather than waiting for the next scheduled run. |
+| `weekly-context` | Mondays | Understat (all six leagues), Club Elo, football-data.co.uk, cup and European fixture schedules. Slower-moving sources. |
 | `backfill` | Manual dispatch | Cold start and repair. Polite 3s spacing. A full `element-summary` sweep of ~700 players takes roughly 35 minutes, which is why routine jobs never perform one. |
 
 All jobs share a `concurrency` group and rebase before pushing, so two runs cannot race on the same commit. The repository is public, so Actions minutes are unlimited.
@@ -318,9 +347,10 @@ Projected growth, which determines whether committing data to Git remains approp
 | Volatile player fields (price, news, ownership; ~20 columns × ~700 rows) | Daily | ~40 KB | ~15 MB |
 | Full `bootstrap-static` snapshot | Weekly | ~250 KB | ~13 MB |
 | `event/{gw}/live` per-player gameweek stats | Per gameweek | ~120 KB | ~5 MB |
-| Fixtures, teams, Understat, odds, Elo | Weekly | — | ~15 MB |
+| Top-1,000 manager picks (15 rows per entry) | Per gameweek | ~100 KB | ~4 MB |
+| Fixtures, teams, Understat (six leagues), odds, Elo, cup schedules | Weekly | — | ~25 MB |
 
-Roughly **45–50 MB per year**, plus a one-off ~50 MB backfill of 2016/17–2025/26. Ten seasons in, that is approximately **0.5 GB**.
+Roughly **60–65 MB per year**, plus a one-off ~50 MB backfill of 2016/17–2025/26. Ten seasons in, that is approximately **0.7 GB**.
 
 GitHub's limits: 50 MiB per-file warning, 100 MiB hard block, repositories ideally under 1 GB and strongly recommended under 5 GB. Nothing in the Acceptable Use Policy prohibits datasets in repositories; the constraints are repository health and excessive bandwidth. Dataset repositories are an established pattern.
 
@@ -357,7 +387,7 @@ Nothing in the free tiers constrains the cadence in §8.
 | Actions minutes | Unlimited for public repositories. | Unconstrained. |
 | Pages bandwidth | 100 GB/month soft limit. | Published artefacts are a few hundred KB. |
 
-The one genuinely expensive operation is a full `element-summary` sweep of ~700 players at 3s spacing — roughly 35 minutes. This is why it is confined to manual backfill and never appears in a scheduled job.
+The one genuinely expensive operation is a full `element-summary` sweep of ~700 players at 3s spacing — roughly 35 minutes. This is why it is confined to manual backfill and never appears in a scheduled job. The `capture-ownership` job is comparable in cost (~1,020 requests at 2s) but runs only once per gameweek and is unavoidable, since the data expires. Both sit far inside the 6-hour Actions job limit.
 
 ### Access risk: datacenter IP blocking — tested and cleared
 
@@ -403,16 +433,19 @@ Because §10 makes staleness visible through `status.json`, a block that develop
 
 This subsystem is large enough that a single undifferentiated plan would be unwieldy. The phases below are sequenced so that each ends somewhere useful and testable.
 
+> **Hard date: the 2026/27 season starts on 21 August 2026.** Phases 1–3 must be live and scheduled before the gameweek 1 deadline, because effective ownership cannot be captured retrospectively (§6.1). Everything from phase 4 onwards can proceed at leisure — historical data is not going anywhere.
+
 1. **Skeleton and storage.** `uv` project, `config.py`, `storage/` with partitioning, atomic and content-addressed writes, `cli.py` shell, CI running `pytest` and `ruff`.
 2. **FPL API connector and raw ingestion.** `sources/base.py`, `sources/fpl_api.py`, `fpl ingest`, recorded-response tests. Ends with real snapshots on disk. (Runner connectivity was verified during design — see §13.)
-3. **Staging and quality gates.** Typed schemas, `fpl stage`, `quality/` gates between layers.
-4. **Scoring rules and facts.** `scoring/rules_2026_27.py` with golden cases, `facts/` assembly, `fpl facts`. **Ends with the points reconciliation test passing against 2025/26** — the single most important milestone in this subsystem, because it proves the rules are understood.
-5. **Historical backfill and identity.** vaastav connector, `identity/` crosswalk build and validation, `fpl backfill`. Ends with ten seasons of facts.
-6. **Tier 2 sources.** Understat, Club Elo, football-data.co.uk through the same connector interface.
-7. **Feature library.** `features/` with the registry, `as_of` filtering, and the leakage test.
-8. **Automation.** The five workflows, failure-to-issue notification, `status.json`, live schema canary.
+3. **Ownership capture, scheduled.** The manager endpoints, the `capture-ownership` workflow, and the `daily-snapshot` workflow. Deliberately ahead of staging and facts: raw capture is what expires, and raw capture is enough to preserve the data. Interpreting it can wait. **Must be live before 21 August.**
+4. **Staging and quality gates.** Typed schemas, `fpl stage`, `quality/` gates between layers.
+5. **Scoring rules and facts.** `scoring/rules_2026_27.py` with golden cases, `facts/` assembly, `fpl facts`. **Ends with the points reconciliation test passing against 2025/26** — the single most important milestone in this subsystem, because it proves the rules are understood.
+6. **Historical backfill and identity.** vaastav connector, `identity/` crosswalk build and validation, `fpl backfill`. Ends with ten seasons of facts.
+7. **Tier 2 sources.** Understat (all six leagues), Club Elo, football-data.co.uk, cup and European fixture schedules, through the same connector interface.
+8. **Feature library.** `features/` with the registry, `as_of` filtering, and the leakage test.
+9. **Remaining automation.** `post-gameweek`, `pre-deadline` and `weekly-context` workflows, failure-to-issue notification, `status.json`, live schema canary.
 
-Phases 1–4 are the critical path; nothing downstream is trustworthy until reconciliation passes.
+Phases 1–3 are date-critical. Phases 4–5 are the correctness critical path; nothing downstream is trustworthy until reconciliation passes.
 
 ---
 
@@ -422,3 +455,20 @@ Phases 1–4 are the critical path; nothing downstream is trustworthy until reco
 - Model families and how to handle having only one season of defensive-contribution data.
 - Whether the app's client-side optimiser is a WASM MILP solver or a simpler heuristic search.
 - Whether personal squad state is read live from the FPL API in the browser or committed to the repository.
+
+---
+
+## Appendix A — Prior art reviewed
+
+Consulted during design. Recorded so later subsystems do not have to rediscover them.
+
+| Project / work | Relevance | Licence | Link |
+|---|---|---|---|
+| **OpenFPL** (Groos, arXiv:2508.09992, 2025) | Position-specific ensembles trained on FPL API + Understat only. Matched commercial FPL Review on hauler RMSE. The benchmark that validates our source selection. | Open source | [arXiv](https://arxiv.org/abs/2508.09992) · [GitHub](https://github.com/daniegr/OpenFPL) |
+| **AIrsenal** (Alan Turing Institute) | Full pipeline: Bayesian Poisson prediction into squad optimisation. Closest analogue to the whole system. | MIT | [GitHub](https://github.com/alan-turing-institute/AIrsenal) |
+| **FPL-Optimization-Tools** (sertalpbilal) | Reference implementation of FPL as a multi-period MILP. Takes exogenous expected-points vectors — it is purely the optimiser, so it composes with our own predictions. | Apache 2.0 (personal use) | [GitHub](https://github.com/sertalpbilal/FPL-Optimization-Tools) |
+| **penaltyblog** (martineastwood) | Dixon-Coles and bivariate Poisson goal models. A building block for team-level goal prediction. | MIT | [GitHub](https://github.com/martineastwood/penaltyblog) |
+| **FPL Review Massive Data Model** | Commercial benchmark. Uses betting odds and predicted lineups we deliberately do not buy. | Commercial | [docs.fplreview.com](https://docs.fplreview.com/the-model/projections/massive-data-model/) |
+| **LiveFPL** (Ragabolly) | The reference tool for top-10k effective ownership. Establishes that manager picks are publicly readable in-season. | Service | [livefpl.net](https://www.livefpl.net/top10k) |
+
+Strategic principles from consistently high-ranking managers (Joshua Bull, Mark Sutherns, Ben Crellin, Simon March) were also reviewed. They bear on the optimiser rather than the data layer, with one exception that shaped this spec: **rank optimisation requires effective ownership**, which is why §6.1 exists and why its capture is date-critical.
