@@ -59,7 +59,7 @@ These were verified during design and are load-bearing. They are recorded becaus
 | Finding | Consequence |
 |---|---|
 | `vaastav/Fantasy-Premier-League` **stopped weekly updates** after 2024/25 — it now publishes 3 times per season. | The archive is usable for historical backfill only. All in-season data must come from the FPL API directly. |
-| **FBref lost its Opta data partnership in early 2026.** Advanced and defensive stats have been removed. | FBref is not a viable source. The FPL API is now effectively the only free source of clearances, blocks, interceptions, tackles and recoveries. |
+| **FBref lost its Opta data partnership in early 2026.** Advanced and defensive stats have been removed. Sports Reference, 2026-01-20: the provider "sent us a letter terminating our access to their data feeds and requiring the deletion of their data from the site immediately". | FBref is not a viable source. The FPL API is now effectively the only free source of clearances, blocks, interceptions, tackles and recoveries. |
 | FPL exposes `clearances_blocks_interceptions`, `tackles`, `recoveries` and `defensive_contribution` **only from 2025/26 onwards**. | Only **one season** (~21k player-fixture rows) of training data exists under the defensive-contribution rules. This is a hard constraint on subsystem 3. |
 | FiveThirtyEight SPI has not been updated since 2023. | Use Club Elo for team strength instead. |
 | FPL's `ep_next`, `form` and `xP` fields are **overwritten in place**, and public archives capture them post-match. | They look like excellent pre-match features but are leakage. Dropped from archive imports; usable only from our own timestamped snapshots. |
@@ -99,6 +99,28 @@ This is what makes "train locally, serve in Actions" safe. There is exactly one 
 1. Historical seasons scored under older rules remain usable — we re-derive their points under current rules wherever the underlying stats exist.
 2. Future rule changes are a new module, not a migration.
 3. Comparing our derived points against FPL's actual points is the single strongest available test that we have understood the rules correctly.
+
+### Ground truth: what history can and cannot teach
+
+The 2026/27 season has not been played, so every model must be trained on earlier seasons scored under different rules. Whether that is legitimate depends entirely on *what* is being learned.
+
+**Component stats are rule-invariant. Market data is not.** A defender does not make more clearances because FPL changed how it rewards them. So minutes, goals, tackles and saves observed in 2019/20 are valid training data for 2026/27, and re-deriving points from them under current rules is sound. Price, ownership, transfers in and out are the opposite: they are collective *responses* to the rules, so a 2019/20 ownership series describes behaviour under a scoring system that no longer exists. Market data is therefore only ever used within its own season.
+
+**Three tiers of component availability.** Not every component reaches equally far back:
+
+| Tier | Components | Depth |
+|---|---|---|
+| Deep | minutes, goals, assists, clean sheets, goals conceded, saves, cards, penalties, own goals | ~10 seasons |
+| Shallow | clearances, blocks, interceptions, tackles, recoveries (the defensive contribution inputs) | 2025/26 only — first exposed by the FPL API that season |
+| **Not derivable** | **bonus** | **no season** |
+
+Bonus is the sharp problem. The BPS table needs passes, crosses, dribbles, big chances created, shots on target, fouls won, goalline clearances and saves-in-box — FPL publishes the BPS *total* but none of its inputs, and no free source supplies them. Bonus must therefore be **modelled from observable proxies**, not computed. Historical `bps` totals carry a known bias under 2026/27 rules (CBI now scores 1 BPS per 3 rather than per 2; being tackled no longer costs −1; a penalty save is 7 not 8), so for 2025/26 the totals can be partially corrected because CBI counts are available, and for earlier seasons they can only be used as a noisy ordinal signal.
+
+**Consequence: never model total points directly.** Model each component and sum through the scoring rules. A single total-points model would be limited to the shallowest input it depends on; component models each train on the deepest history available to them.
+
+**Consequence: `facts/player_fixture` carries a per-row availability mask.** A boolean column per component recording whether that component was *observed* for that row. Without it a model reads ten seasons of missing tackle data as ten seasons of zero tackles, which is not a subtle error — it is a systematic one concentrated exactly on the defenders the shallow tier exists to evaluate.
+
+Backfilling the shallow tier was investigated and rejected. Every source with Opta-compatible definitions and per-match depth (Sofascore, FotMob, WhoScored) prohibits redistribution from a public repository, and Football DataCo database rights apply on top of the site terms. The legally clean alternatives cover one Premier League season each (Wyscout 2017/18 under CC BY 4.0; StatsBomb 2015/16), have no 2025/26 overlap to validate against, and Wyscout's "recovery" is a possession-level event rather than Opta's per-player one — so it cannot reproduce the `R` term that the midfielder and forward threshold of 12 depends on. Mislabelled rows at exactly the threshold would be worse than no backfill. **We accept one season of defensive-contribution training data.**
 
 ---
 
@@ -359,6 +381,8 @@ Projected growth, which determines whether committing data to Git remains approp
 
 Roughly **60–65 MB per year**, plus a one-off ~50 MB backfill of 2016/17–2025/26. Ten seasons in, that is approximately **0.7 GB**.
 
+**Measured against reality (2026-07-30, first live ingestion).** A full `bootstrap-static` snapshot is 1.33 MB of JSON compressing to **115 KB**, and `fixtures` is 118 KB compressing to **4.7 KB** — so a complete daily `daily-snapshot` commit is **~120 KB**, against the ~250 KB weekly figure the table assumed. The estimate above is conservative and stands. Two assumptions were wrong in offsetting directions: the roster is 564 players pre-season rather than ~700 (it grows through the season), while a full snapshot is stored every day rather than weekly, because content addressing already suppresses the unchanged ones and a whole-payload snapshot is simpler than a volatile-column subset.
+
 GitHub's limits: 50 MiB per-file warning, 100 MiB hard block, repositories ideally under 1 GB and strongly recommended under 5 GB. Nothing in the Acceptable Use Policy prohibits datasets in repositories; the constraints are repository health and excessive bandwidth. Dataset repositories are an established pattern.
 
 Two properties keep this safe rather than lucky: append-only means each commit adds a new small file rather than rewriting a large one, so there is no delta bloat; and raw payloads are stored gzipped and content-addressed, so sources that genuinely did not change between pulls — fixtures, Club Elo, football-data between match rounds — are never rewritten. `bootstrap-static` does change most nights, since ownership always shifts, which is why the daily staged snapshot keeps only the volatile column subset.
@@ -443,8 +467,8 @@ This subsystem is large enough that a single undifferentiated plan would be unwi
 > **Hard date: the 2026/27 season starts on 21 August 2026.** Phases 1–3 must be live and scheduled before the gameweek 1 deadline, because effective ownership cannot be captured retrospectively (§6.1). Everything from phase 4 onwards can proceed at leisure — historical data is not going anywhere.
 
 1. **Skeleton and storage.** `uv` project, `config.py`, `storage/` with partitioning, atomic and content-addressed writes, `cli.py` shell, CI running `pytest` and `ruff`.
-2. **FPL API connector and raw ingestion.** `sources/base.py`, `sources/fpl_api.py`, `fpl ingest`, recorded-response tests. Ends with real snapshots on disk. (Runner connectivity was verified during design — see §13.)
-3. **Ownership capture, scheduled.** The manager endpoints, the `capture-ownership` workflow, and the `daily-snapshot` workflow. Deliberately ahead of staging and facts: raw capture is what expires, and raw capture is enough to preserve the data. Interpreting it can wait. **Must be live before 21 August.**
+2. **FPL API connector and raw ingestion.** `sources/base.py`, `sources/fpl_api.py`, `fpl ingest`, recorded-response tests, and the `daily-snapshot` workflow. Ends with real snapshots on disk and accumulating nightly. (Runner connectivity was verified during design — see §13. `daily-snapshot` was moved here from phase 3: pre-season price and ownership movement begins when the game opens in early August and is use-it-or-lose-it, so the earlier it is scheduled the more of it we keep.)
+3. **Ownership capture, scheduled.** The manager endpoints and the `capture-ownership` workflow. Deliberately ahead of staging and facts: raw capture is what expires, and raw capture is enough to preserve the data. Interpreting it can wait. **Must be live before 21 August.**
 4. **Staging and quality gates.** Typed schemas, `fpl stage`, `quality/` gates between layers.
 5. **Scoring rules and facts.** `scoring/rules_2026_27.py` with golden cases, `facts/` assembly, `fpl facts`. **Ends with the points reconciliation test passing against 2025/26** — the single most important milestone in this subsystem, because it proves the rules are understood.
 6. **Historical backfill and identity.** vaastav connector, `identity/` crosswalk build and validation, `fpl backfill`. Ends with ten seasons of facts.
@@ -459,7 +483,7 @@ Phases 1–3 are date-critical. Phases 4–5 are the correctness critical path; 
 ## 16. Open questions deferred to later specs
 
 - Which features the store should actually compute. This spec fixes the mechanism and the contract, not the feature list; that belongs with model design, where features can be justified against measured performance.
-- Model families and how to handle having only one season of defensive-contribution data.
+- Model families, and how to make the most of a single season of defensive-contribution data. §4 settles that the data cannot be legally backfilled and that the availability mask keeps the gap visible; what remains open is the modelling response — pooling across positions, hierarchical priors, or proxying from minutes and position.
 - Whether the app's client-side optimiser is a WASM MILP solver or a simpler heuristic search.
 - Whether personal squad state is read live from the FPL API in the browser or committed to the repository.
 
