@@ -1,1 +1,19 @@
+# Brainstorming session artefacts
 .superpowers/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+
+# Scratch output from `fpl features` and ad-hoc exploration.
+# Never inside data/ — data/ is the committed record.
+scratch/
+
+# Notebook outputs are stripped before commit
+.ipynb_checkpoints/
