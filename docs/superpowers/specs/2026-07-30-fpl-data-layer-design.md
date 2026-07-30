@@ -67,7 +67,9 @@ These were verified during design and are load-bearing. They are recorded becaus
 | From 2026/27, FPL locks a gameweek's points at 09:00 UK the day after its last match. | Facts for a gameweek are only final after that lock. |
 | Fixture counts are not stable more than ~3 gameweeks ahead; doubles and blanks are confirmed 2–6 weeks out. | The features layer must express fixture count as uncertain beyond a short horizon. |
 | **OpenFPL** (arXiv:2508.09992, 2025) matched the commercial FPL Review Massive Data Model on hauler RMSE (5.142 vs 5.172) using **only the FPL API and Understat**. | Strong evidence that the Tier 1 + Tier 2 source set is sufficient to reach state-of-the-art on public data. Paid odds feeds are not a prerequisite. |
-| Manager picks are **not retained by FPL across seasons**, and no public archive reconstructs them. | Effective ownership is the one dataset in this design that cannot be backfilled. Capture must begin at gameweek 1 (see §6.1). |
+| Manager picks are **not retained by FPL across seasons**, and no public archive reconstructs them. | Effective ownership is the one dataset in this design that cannot be backfilled. Capture must begin in-season (see §6.1). |
+| **The overall league is empty until a gameweek has been scored.** League 314 was recreated on 2026-07-23 and returns zero standings rows despite 2.28m registered entries. | There is no top 1,000 to enumerate during gameweek 1. Elite capture starts at gameweek 2; the mini-league cohort, which is enumerable from the start, covers gameweek 1 (§6.1). |
+| Entry IDs are issued in registration order, and early registrants are far stronger: median 2025/26 rank 127k for IDs 1–25 against 2.25m for IDs near 400k. | A skill-based cohort can be assembled without waiting for a gameweek. `entry/{id}/history/` is immutable, so this is available at any time and is deliberately off the critical path (§6.1). |
 
 ---
 
@@ -167,7 +169,8 @@ data/
     fpl/event_live/season=2026-27/event=1/as_of=.../
     fpl/element_summary/season=2026-27/as_of=.../
     fpl/league_standings/season=2026-27/event=1/as_of=.../
-    fpl/entry_picks/season=2026-27/event=1/as_of=.../
+    fpl/entry_picks/season=2026-27/cohort=elite/event=2/chunk=0000/
+    fpl/entry_picks/season=2026-27/cohort=mini/event=1/chunk=0000/
     vaastav/ understat/ clubelo/ footballdata/ cupfixtures/
 
   staged/
@@ -240,22 +243,71 @@ EO% = ownership% + captaincy% + (2 × triple-captaincy%)
 
 A high-EV player that almost everyone owns and captains protects rank but cannot gain it; rank is gained by differentials, and lost by them too. Optimising raw expected points while ignoring EO produces systematic over-differentiation and unstable rank. Global ownership from `bootstrap-static` is not a substitute — it is diluted by millions of dormant teams and carries no captaincy information at all.
 
-**This dataset is use-it-or-lose-it.** FPL does not retain manager picks across seasons: once 2026/27 ends, its picks are gone, and no public archive reconstructs them. Unlike every other source in this design, effective ownership **cannot be backfilled**. If capture does not begin at gameweek 1, neither EO features nor any backtest of rank-optimised decisions is possible for that season.
+**EO is not a model input.** No prediction depends on who owns a player. EO enters only at the decision layer, where the question is how much rank a pick gains if it comes off against how much it loses if it does not. A gap in EO therefore degrades team selection, never forecast accuracy.
 
-**Capture design.** After each deadline, page through the overall league (`leagues-classic/314/standings`, 50 entries per page) to collect the top 1,000 entry IDs, then fetch `entry/{id}/event/{gw}/picks/` for each. Roughly 1,020 requests at 2s spacing — about 35 minutes, once per gameweek.
+**This dataset is use-it-or-lose-it.** FPL does not retain manager picks across seasons: once 2026/27 ends, its picks are gone, and no public archive reconstructs them (verified 2026-07-30: `entry/1/event/38/picks/` returns 404 for the completed 2025/26 season). Unlike every other source in this design, effective ownership **cannot be backfilled**.
+
+The expiry is at *season* rollover, not gameweek end. Picks for a completed gameweek remain readable for the rest of the season, so a missed week can be recovered later within the same season — but nothing survives into the next one.
+
+### Two rival sets, and why they need different treatment
+
+The design tracks two populations, because "who am I competing with" has two answers with different mathematics.
+
+| | Overall rank | Mini-league |
+|---|---|---|
+| Opponents | ~2.3m | ~10–20 |
+| Observability | Sampled — the top 1,000 stand in for the field | **Exact — every rival's squad is readable** |
+| Cost per gameweek | ~1,020 requests | ~20 requests |
+| Correct strategy | Maximise expected points with mild variance control | Depends on standing: copy rivals when ahead to kill variance, differentiate when behind even at a cost in expected points |
+
+The overall case needs a statistical proxy because the field cannot be enumerated. The mini-league case needs no proxy at all — the league's standings endpoint returns every member, and each member's picks are one request. Mini-league capture is therefore both cheaper and *more* accurate than the elite sample, and it is the one that maps to the primary objective.
+
+The mini-league ID is configuration, not a constant. It can be discovered from `entry/{id}/` once registered, which lists every league the entry belongs to with its numeric ID.
+
+### Why elite capture starts at gameweek 2
+
+**The overall league is empty until a gameweek has been scored.** Verified 2026-07-30: league 314 was recreated on 23 July and returns `standings.results: []` despite 2.28m registered entries. Ranks do not exist before a ball is kicked, so during gameweek 1 there is no top 1,000 to enumerate. Elite capture therefore begins at gameweek 2.
+
+Gameweek 1 is skipped rather than reconstructed. It could be captured retroactively once gameweek 1 is scored, but that cohort would be selected on a single gameweek's outcome — mostly noise — and would not mean the same thing as every other week's cohort. A silently different definition in one row of a time series is worse than an honest gap.
+
+The cost is small, and specific: picking the initial 15 is a constrained maximisation in which ownership has no place, so the opening squad is unchanged. Captaincy is the only real loss, and pre-season global ownership is an unusually good substitute there — it is normally diluted by abandoned teams, but only the engaged fraction of last season's ~12m managers has registered so far, so it currently describes active pickers. The residual cost is one missing observation in 38 when backtesting rank-optimised decisions.
+
+An alternative cohort was investigated and deferred rather than rejected: entry IDs are issued in registration order, and early registrants are dramatically stronger, so a skill-based cohort could be assembled before any gameweek by scanning low entry IDs for prior-season rank.
+
+| Entry ID band | Median 2025/26 rank | Finished top 10k |
+|---|---|---|
+| 1–25 | 127k | 2/21 |
+| ~1,000 | 376k | 2/20 |
+| ~20,000 | 1.13m | 1/19 |
+| ~400,000 | 2.25m | 0/18 |
+
+This is deliberately *not* on the critical path: `entry/{id}/history/` is immutable, so the scan yields the same cohort whenever it is run. It can be built at leisure and applied retroactively to any gameweek still in the season.
+
+**Capture design.** Both cohorts use the same two steps: resolve a league's members, then fetch `entry/{id}/event/{gw}/picks/` for each. They differ only in scale and in when they start.
+
+| Cohort | League | Entries | Requests per gameweek | From |
+|---|---|---|---|---|
+| Elite | `leagues-classic/314` (Overall) | Top 1,000 | ~1,020, ~35 min at 2s | GW2 |
+| Mini-league | configured league ID | All members | ~20, under a minute | GW1 |
+
+Each captured gameweek records which cohort it came from, so the two are never averaged together.
 
 **The capture window is the whole gameweek, not the 90 minutes before kickoff.** The rules state that automatic substitutions are *processed at the end of the gameweek*, so a team's recorded starting XI and captain reflect the manager's actual decision at any point from the deadline until the gameweek's last match finishes — a window of two to three days rather than ninety minutes. Two consequences follow, and both matter:
 
 - The job can be scheduled generously and retried repeatedly, instead of having to land inside a narrow slot with a 35-minute runtime.
 - Correctness must still be *asserted*, not assumed. Each captured pick set carries an `automatic_subs` array which is empty until the gameweek completes. **A non-empty `automatic_subs` means the capture ran too late and the XI has been rewritten** — the record is marked contaminated rather than silently stored as if it were a decision.
 
+Contamination degrades the record, it does not destroy it. `automatic_subs` names each substitution's `element_in` and `element_out`, so the original XI can be reconstructed; squad membership and the `is_captain` flag are never rewritten at all. A late capture is thus recoverable, which is why a missed gameweek is worth collecting late rather than abandoning.
+
 The set of entries is stable across the window for the same reason: FPL's official ranks do not update live during a gameweek, so `leagues-classic/314/standings` returns the previous gameweek's confirmed ranking throughout. Capturing early and capturing late select the same 1,000 managers.
+
+Top-1,000 is a deliberate approximation of the top-10k benchmark that community tools use: it is an order of magnitude cheaper and its bias is known and consistent, which is what matters for a feature used comparatively.
 
 Top-1,000 is a deliberate approximation of the top-10k benchmark that community tools use: it is an order of magnitude cheaper and its bias is known and consistent, which is what matters for a feature used comparatively.
 
 Staged output is one row per (gameweek, entry, player) with captain and vice-captain flags, from which EO per player per gameweek aggregates directly.
 
-> **Verification status.** `entry/{id}/` and `entry/{id}/history/` were confirmed public and unauthenticated during design. `entry/{id}/event/{gw}/picks/` could not be verified because the 2026/27 season had not started and no prior-season picks are retained. It is public in the current season — this is how community ownership tools operate — but the connector must be tested against a live gameweek at the first opportunity.
+> **Verification status (updated 2026-07-30).** `entry/{id}/`, `entry/{id}/history/` and `leagues-classic/314/standings/` are confirmed public and unauthenticated. `entry/{id}/event/{gw}/picks/` returns 404 for a completed prior season, confirming picks are not retained across seasons; it therefore still **cannot be verified for a live gameweek** until GW1 kicks off. Live tools depend on it, so it is near-certainly public, but the connector must be exercised against a real gameweek at the first opportunity.
 
 ### Identity resolution
 
@@ -287,7 +339,7 @@ Two kinds of time exist in the facts layer, and `as_of` filters both.
 | `daily-snapshot` | 03:30 UTC daily | Runs after FPL's nightly price run. Pulls `bootstrap-static` and `fixtures` — two requests. Captures prices, ownership, injury news, status. |
 | `post-gameweek` | 09:30 UTC daily | FPL finalises a gameweek at 09:00 UK the day after its last match. Checks whether a gameweek just locked; if so pulls `event/{gw}/live` (all players, one request), rebuilds facts, and reconciles derived points against FPL's. Once models exist it also appends predicted-vs-realised to `monitoring/`; until then that step is inert. Exits in seconds otherwise. |
 | `pre-deadline` | Hourly, Thu–Sun | Reads the real deadline from `events` and no-ops unless within the window. Refreshes availability. Once models exist it runs inference and publishes predictions; until then it publishes `status.json` only. Cron cannot express "90 minutes before a moving kickoff", so the job decides. |
-| `capture-ownership` | Every 30 min | Fires once per gameweek, after that gameweek's deadline and before its last match finishes (§6.1). Collects the top 1,000 overall entries and their picks. ~35 minutes, resumable. **The one job that cannot be missed** — the data it captures is unrecoverable afterwards, so it runs frequently, resumes partial progress, and raises an issue immediately on failure rather than waiting for the next run. |
+| `capture-ownership` | Every 30 min | Fires once per gameweek, after that gameweek's deadline and before its last match finishes (§6.1). Captures the configured mini-league every gameweek, and the top 1,000 overall entries from gameweek 2 — the overall league has no ranking before then. ~35 minutes at full scale, resumable. **The one job that cannot be missed within a season** — it runs frequently, resumes partial progress, and raises an issue immediately on failure rather than waiting for the next run. |
 | `weekly-context` | Mondays | Understat (all six leagues), Club Elo, football-data.co.uk, cup and European fixture schedules. Slower-moving sources. |
 | `backfill` | Manual dispatch | Cold start and repair. Polite 3s spacing. A full `element-summary` sweep of ~700 players takes roughly 35 minutes, which is why routine jobs never perform one. |
 
@@ -468,7 +520,7 @@ This subsystem is large enough that a single undifferentiated plan would be unwi
 
 1. **Skeleton and storage.** `uv` project, `config.py`, `storage/` with partitioning, atomic and content-addressed writes, `cli.py` shell, CI running `pytest` and `ruff`.
 2. **FPL API connector and raw ingestion.** `sources/base.py`, `sources/fpl_api.py`, `fpl ingest`, recorded-response tests, and the `daily-snapshot` workflow. Ends with real snapshots on disk and accumulating nightly. (Runner connectivity was verified during design — see §13. `daily-snapshot` was moved here from phase 3: pre-season price and ownership movement begins when the game opens in early August and is use-it-or-lose-it, so the earlier it is scheduled the more of it we keep.)
-3. **Ownership capture, scheduled.** The manager endpoints and the `capture-ownership` workflow. Deliberately ahead of staging and facts: raw capture is what expires, and raw capture is enough to preserve the data. Interpreting it can wait. **Must be live before 21 August.**
+3. **Ownership capture, scheduled.** The manager endpoints and the `capture-ownership` workflow, covering both the mini-league cohort (from gameweek 1) and the elite cohort (from gameweek 2, when the overall league first has a ranking). Deliberately ahead of staging and facts: raw capture is what expires, and raw capture is enough to preserve the data. Interpreting it can wait. **Must be live before 21 August.**
 4. **Staging and quality gates.** Typed schemas, `fpl stage`, `quality/` gates between layers.
 5. **Scoring rules and facts.** `scoring/rules_2026_27.py` with golden cases, `facts/` assembly, `fpl facts`. **Ends with the points reconciliation test passing against 2025/26** — the single most important milestone in this subsystem, because it proves the rules are understood.
 6. **Historical backfill and identity.** vaastav connector, `identity/` crosswalk build and validation, `fpl backfill`. Ends with ten seasons of facts.
