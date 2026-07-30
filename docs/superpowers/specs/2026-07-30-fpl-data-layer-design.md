@@ -279,6 +279,7 @@ Governing rule: **fail loudly, never silently degrade.** A missing day of data i
 |---|---|---|
 | Network blip / 5xx | Retry with exponential backoff and jitter, then abandon the run | Tomorrow's run recovers it; snapshots are append-only, so a gap is just a gap |
 | Rate limited / throttled | Back off and abandon cleanly | Politeness matters on an undocumented API we depend on entirely |
+| `403 Forbidden` | **Do not retry.** Raise an issue immediately | A 403 from Cloudflare means the runner is blocked, not that the request was mistimed. Retrying into a block wastes requests and delays discovery (§13) |
 | Source schema changed | **Hard fail.** Nothing downstream runs | FPL adds and removes fields between seasons. Guessing at a changed schema produces a season of subtly wrong data |
 | Unmapped player identity | **Hard fail** if they recorded minutes | A silently dropped player is invisible; a failed build is not |
 | Quality gate fails | Block the commit | Bad data never reaches `main`, so `main` is always trustworthy |
@@ -329,7 +330,55 @@ Two properties keep this safe rather than lucky: append-only means each commit a
 
 ---
 
-## 13. Contracts consumed by other subsystems
+## 13. Credentials, rate limits and access risk
+
+### Credentials
+
+**No credentials or API keys are required for any source in scope.** Nothing needs to be created, and no repository secrets are needed beyond the `GITHUB_TOKEN` that Actions provides automatically.
+
+| Source | Auth | Notes |
+|---|---|---|
+| FPL API | None | The endpoints in scope (`bootstrap-static`, `fixtures`, `event/{gw}/live`, `element-summary`) are all public. Only `my-team` and live own-squad endpoints need a session cookie, and those are out of scope. |
+| Understat | None | Public pages, scraped via `understatapi`. |
+| Club Elo | None | Free public REST API. **HTTP only — `https://api.clubelo.com` does not respond; use `http://`.** Acceptable here as the data is public and non-sensitive, but the connector must not silently upgrade the scheme. |
+| football-data.co.uk | None | Static CSV downloads. |
+| vaastav archive | None | Public GitHub repository. |
+
+### Rate limits
+
+Nothing in the free tiers constrains the cadence in §8.
+
+| Limit | Value | Our usage |
+|---|---|---|
+| FPL API | No published limit. Community norm is 2–5s between requests. | `daily-snapshot` makes 2 requests; `post-gameweek` makes 1. Comfortably inside any plausible limit. |
+| Club Elo | No documented limit. | A handful of requests weekly. |
+| football-data.co.uk | Static files, no limit. | One CSV weekly. |
+| GitHub API | 60/hour unauthenticated; 1,000/hour per repository with `GITHUB_TOKEN`. | Only relevant to the vaastav backfill, which must fetch a **single tarball or shallow clone** rather than hundreds of individual raw-file requests. |
+| Actions minutes | Unlimited for public repositories. | Unconstrained. |
+| Pages bandwidth | 100 GB/month soft limit. | Published artefacts are a few hundred KB. |
+
+The one genuinely expensive operation is a full `element-summary` sweep of ~700 players at 3s spacing — roughly 35 minutes. This is why it is confined to manual backfill and never appears in a scheduled job.
+
+### Access risk: datacenter IP blocking
+
+**This is the one material risk to the design and it is unverified.**
+
+The FPL site sits behind Cloudflare. There are community reports of `403 Forbidden` responses when the API is called from datacenter IP ranges — AWS, Azure, and by extension GitHub Actions runners — even for a single well-behaved request, because the traffic is classified as automated rather than because any limit was exceeded. The API responds normally from residential and corporate connections; this was confirmed during design.
+
+If Actions runners are blocked, the "Actions pulls the data" premise fails and the fallback is materially worse. So this must be tested empirically **before any other implementation work**, as the first task of phase 2 — a throwaway workflow that fetches `bootstrap-static` once and reports the status code. It costs minutes to answer and would otherwise be discovered after the pipeline is built.
+
+Mitigations, in order of preference:
+
+1. **Descriptive `User-Agent`** identifying the project and a contact address. Good practice regardless, and sometimes sufficient.
+2. **Treat `403` as a distinct failure class from `5xx`.** A 403 means blocked, not transient: raise an issue immediately rather than retrying into the block. This is an explicit addition to the failure taxonomy in §10.
+3. **Self-hosted runner** on a home machine. Keeps the entire design intact — same workflows, same CLI, just a different runner label — at the cost of that machine being on.
+4. **Scheduled local runs** pushing to the repository. Loses unattended operation, which was a primary requirement.
+
+Because §10 makes staleness visible through `status.json`, a block that develops mid-season is detectable rather than silent.
+
+---
+
+## 14. Contracts consumed by other subsystems
 
 | Consumer | Contract |
 |---|---|
@@ -340,12 +389,12 @@ Two properties keep this safe rather than lucky: append-only means each commit a
 
 ---
 
-## 14. Suggested implementation phases
+## 15. Suggested implementation phases
 
 This subsystem is large enough that a single undifferentiated plan would be unwieldy. The phases below are sequenced so that each ends somewhere useful and testable.
 
 1. **Skeleton and storage.** `uv` project, `config.py`, `storage/` with partitioning, atomic and content-addressed writes, `cli.py` shell, CI running `pytest` and `ruff`.
-2. **FPL API connector and raw ingestion.** `sources/base.py`, `sources/fpl_api.py`, `fpl ingest`, recorded-response tests. Ends with real snapshots on disk.
+2. **FPL API connector and raw ingestion.** **First task: verify a GitHub Actions runner is not Cloudflare-blocked (§13).** Then `sources/base.py`, `sources/fpl_api.py`, `fpl ingest`, recorded-response tests. Ends with real snapshots on disk.
 3. **Staging and quality gates.** Typed schemas, `fpl stage`, `quality/` gates between layers.
 4. **Scoring rules and facts.** `scoring/rules_2026_27.py` with golden cases, `facts/` assembly, `fpl facts`. **Ends with the points reconciliation test passing against 2025/26** — the single most important milestone in this subsystem, because it proves the rules are understood.
 5. **Historical backfill and identity.** vaastav connector, `identity/` crosswalk build and validation, `fpl backfill`. Ends with ten seasons of facts.
@@ -357,7 +406,7 @@ Phases 1–4 are the critical path; nothing downstream is trustworthy until reco
 
 ---
 
-## 15. Open questions deferred to later specs
+## 16. Open questions deferred to later specs
 
 - Which features the store should actually compute. This spec fixes the mechanism and the contract, not the feature list; that belongs with model design, where features can be justified against measured performance.
 - Model families and how to handle having only one season of defensive-contribution data.
