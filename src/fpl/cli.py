@@ -33,8 +33,8 @@ from fpl.ownership import (
     MINI_COHORT,
     CaptureTarget,
     capture_ownership,
+    current_bootstrap,
     elite_target,
-    load_latest_bootstrap,
     mini_target,
     resolve_capture_event,
 )
@@ -213,10 +213,11 @@ def capture_ownership_command(
     config = Config.load()
     league_id = league if league is not None else config.mini_league_id
 
-    bootstrap = load_latest_bootstrap(parsed, data_root=data_root)
+    bootstrap = current_bootstrap(parsed, data_root=data_root)
     if bootstrap is None:
         typer.secho(
-            "No stored bootstrap-static. Run 'fpl ingest fpl' first.",
+            "bootstrap-static is unavailable live and nothing is stored. "
+            "Run 'fpl ingest fpl' first.",
             err=True,
             fg=typer.colors.RED,
         )

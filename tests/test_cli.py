@@ -108,7 +108,32 @@ class TestCaptureOwnershipCommand:
     """Runs every 30 minutes and does nothing almost every time, so the
     do-nothing paths matter more than the working one."""
 
-    def _bootstrap(self, root: Path, *, deadline: str, finished: bool = False) -> None:
+    @pytest.fixture(autouse=True)
+    def _no_real_network(self):
+        """Every test in this class reaches for the live bootstrap, so the
+        router is always on: an unmocked request fails loudly rather than
+        hitting the real API."""
+        with respx.mock:
+            yield
+
+    def _bootstrap(self, *, deadline: str, finished: bool = False) -> None:
+        """Serve bootstrap live rather than from disk.
+
+        Capture reads the API directly so it sees current `finished` flags
+        without committing a snapshot on every half-hourly tick.
+        """
+        respx.get(f"{fpl_api.BASE_URL}/bootstrap-static/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "events": [{"id": 1, "deadline_time": deadline, "finished": finished}],
+                    "elements": [{"id": 1}],
+                    "teams": [{"id": 1}],
+                },
+            )
+        )
+
+    def _stored_bootstrap(self, root: Path, *, deadline: str) -> None:
         artifact = RawArtifact(
             source="fpl",
             endpoint="bootstrap_static",
@@ -116,48 +141,67 @@ class TestCaptureOwnershipCommand:
             url="https://x",
             http_status=200,
             body=json.dumps(
-                {"events": [{"id": 1, "deadline_time": deadline, "finished": finished}]}
+                {"events": [{"id": 1, "deadline_time": deadline, "finished": False}]}
             ).encode(),
             fetched_at=datetime(2026, 8, 1, tzinfo=UTC),
             connector_version="1",
         )
         write_raw(artifact, data_root=root)
 
-    def test_requires_a_stored_bootstrap(self, tmp_path: Path) -> None:
+    def test_requires_a_bootstrap_from_somewhere(self, tmp_path: Path) -> None:
+        """Live fetch unmocked and nothing on disk: there is no way to know
+        which gameweek is open, so refuse rather than guess."""
         result = runner.invoke(app, ["--data-root", str(tmp_path), "capture-ownership"])
         assert result.exit_code == exit_codes.FAILURE
         assert "ingest fpl" in result.output
 
+    def test_falls_back_to_the_stored_copy_when_the_api_is_down(self, tmp_path: Path) -> None:
+        """Deadlines do not move, so a day-old snapshot still resolves the
+        gameweek correctly. An unreachable API must not skip a capture."""
+        self._stored_bootstrap(tmp_path, deadline=OPEN_DEADLINE)
+        result = runner.invoke(
+            app,
+            ["--data-root", str(tmp_path), "capture-ownership", "--league", "999", "--dry-run"],
+        )
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "would capture cohort=mini" in result.output
+
     def test_no_open_gameweek_exits_successfully(self, tmp_path: Path) -> None:
         """'Nothing to capture' is the normal state, not a failure."""
-        self._bootstrap(tmp_path, deadline=FUTURE_DEADLINE)
+        self._bootstrap(deadline=FUTURE_DEADLINE)
         result = runner.invoke(
             app, ["--data-root", str(tmp_path), "capture-ownership", "--league", "999"]
         )
         assert result.exit_code == exit_codes.SUCCESS
         assert "nothing_to_do" in result.output
 
+    def test_resolving_the_gameweek_writes_nothing(self, tmp_path: Path) -> None:
+        """The job ticks 48 times a day. If each tick persisted bootstrap it
+        would commit ~5 MB daily and duplicate the daily snapshot."""
+        self._bootstrap(deadline=FUTURE_DEADLINE)
+        runner.invoke(app, ["--data-root", str(tmp_path), "capture-ownership", "--league", "999"])
+        assert list(tmp_path.rglob("*.json.gz")) == []
+
     def test_dry_run_reports_the_plan_without_fetching(self, tmp_path: Path) -> None:
-        self._bootstrap(tmp_path, deadline=OPEN_DEADLINE)
-        with respx.mock:
-            result = runner.invoke(
-                app,
-                [
-                    "--data-root",
-                    str(tmp_path),
-                    "capture-ownership",
-                    "--league",
-                    "999",
-                    "--dry-run",
-                ],
-            )
+        self._bootstrap(deadline=OPEN_DEADLINE)
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(tmp_path),
+                "capture-ownership",
+                "--league",
+                "999",
+                "--dry-run",
+            ],
+        )
         assert result.exit_code == exit_codes.SUCCESS
         assert "would capture cohort=mini" in result.output
 
     def test_elite_cohort_is_not_attempted_in_gameweek_one(self, tmp_path: Path) -> None:
         """The overall league has no ranking until a gameweek has been scored,
         so an open GW1 yields work for the mini cohort but not the elite one."""
-        self._bootstrap(tmp_path, deadline=OPEN_DEADLINE)
+        self._bootstrap(deadline=OPEN_DEADLINE)
         elite = runner.invoke(
             app,
             ["--data-root", str(tmp_path), "capture-ownership", "--cohort", "elite", "--dry-run"],
@@ -181,7 +225,7 @@ class TestCaptureOwnershipCommand:
         assert "would capture cohort=mini" in mini.output
 
     def test_missing_mini_league_warns_but_does_not_stop_the_run(self, tmp_path: Path) -> None:
-        self._bootstrap(tmp_path, deadline=OPEN_DEADLINE)
+        self._bootstrap(deadline=OPEN_DEADLINE)
         result = runner.invoke(
             app, ["--data-root", str(tmp_path), "capture-ownership", "--dry-run"]
         )
@@ -189,22 +233,21 @@ class TestCaptureOwnershipCommand:
         assert "No mini-league configured" in result.output
 
     def test_asking_for_mini_without_a_league_is_a_usage_error(self, tmp_path: Path) -> None:
-        self._bootstrap(tmp_path, deadline=OPEN_DEADLINE)
+        self._bootstrap(deadline=OPEN_DEADLINE)
         result = runner.invoke(
             app, ["--data-root", str(tmp_path), "capture-ownership", "--cohort", "mini"]
         )
         assert result.exit_code == exit_codes.USAGE
 
     def test_unknown_cohort_is_rejected(self, tmp_path: Path) -> None:
-        self._bootstrap(tmp_path, deadline=OPEN_DEADLINE)
+        self._bootstrap(deadline=OPEN_DEADLINE)
         result = runner.invoke(
             app, ["--data-root", str(tmp_path), "capture-ownership", "--cohort", "nonsense"]
         )
         assert result.exit_code == exit_codes.USAGE
 
-    @respx.mock
     def test_captures_a_mini_league_end_to_end(self, tmp_path: Path) -> None:
-        self._bootstrap(tmp_path, deadline=OPEN_DEADLINE)
+        self._bootstrap(deadline=OPEN_DEADLINE)
         respx.get(f"{fpl_api.BASE_URL}/leagues-classic/999/standings/").mock(
             return_value=httpx.Response(
                 200,

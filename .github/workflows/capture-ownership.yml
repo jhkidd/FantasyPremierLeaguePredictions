@@ -47,11 +47,10 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      # Capture reads the stored bootstrap to decide which gameweek is open,
-      # so a stale snapshot would mean capturing the wrong week. Refresh first.
-      - name: Refresh bootstrap
-        run: uv run fpl ingest fpl --endpoint bootstrap-static
-
+      # No bootstrap refresh here on purpose. Capture reads the live API in
+      # memory to resolve the open gameweek: persisting a snapshot on every
+      # half-hourly tick would commit ~5 MB a day and duplicate the daily
+      # snapshot's job.
       - name: Capture
         env:
           FPL_MINI_LEAGUE_ID: ${{ vars.FPL_MINI_LEAGUE_ID }}

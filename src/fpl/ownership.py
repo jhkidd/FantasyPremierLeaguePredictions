@@ -37,6 +37,7 @@ __all__ = [
     "CaptureTarget",
     "capture_ownership",
     "collect_entry_ids",
+    "current_bootstrap",
     "elite_target",
     "entries_per_page",
     "load_latest_bootstrap",
@@ -331,6 +332,39 @@ def load_latest_bootstrap(
         return None
     body, _meta = read_raw(partition)
     payload = json.loads(body)
+    return payload if isinstance(payload, dict) else None
+
+
+def current_bootstrap(
+    season: Season,
+    *,
+    connector: FplApiConnector | None = None,
+    data_root: Path | None = None,
+) -> dict[str, Any] | None:
+    """The freshest `bootstrap-static` available, fetched but deliberately not stored.
+
+    Capture needs the live `finished` flags to tell an open gameweek from a
+    closed one, but it runs every 30 minutes and bootstrap changes constantly
+    during a season. Persisting it here would commit a 117 KB snapshot 48 times
+    a day and duplicate the job the daily snapshot exists to do, so this holds
+    the payload in memory instead.
+
+    Falls back to the stored copy when the API is unreachable. That copy is at
+    most a day old, and deadlines — the part that decides whether to capture —
+    do not move.
+    """
+    owns = connector is None
+    client = connector or FplApiConnector(season)
+    try:
+        artifact = client.bootstrap_static()
+    except Exception as exc:  # noqa: BLE001 - any fetch failure falls back to disk
+        log_event(logger, "bootstrap_live_read_failed", error=str(exc))
+        return load_latest_bootstrap(season, data_root=data_root)
+    finally:
+        if owns:
+            client.close()
+
+    payload = json.loads(artifact.body)
     return payload if isinstance(payload, dict) else None
 
 
