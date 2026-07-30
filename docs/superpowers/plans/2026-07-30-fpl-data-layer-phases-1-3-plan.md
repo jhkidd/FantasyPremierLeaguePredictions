@@ -198,93 +198,93 @@ Run `bootstrap-static` and `fixtures` against the live API and commit the result
 
 ---
 
-## Phase 3 — Ownership capture, scheduled ⏰ **date-critical**
+## Phase 3 — Ownership capture, scheduled ⏰ **date-critical** — ✅ built, capture path unrehearsed
 
-**Goal:** an unattended job that reliably captures the top 1,000 managers' picks from GW1.
+**Goal:** an unattended job that reliably captures rival squads every gameweek.
 **Target:** 10 – 16 Aug, with rehearsal 17 – 20 Aug.
 
-### 3.1 Manager endpoints
+> **Revised 30 July after probing the live API.** The original plan assumed a single cohort — the top 1,000 of the overall league — captured from GW1. That is not possible. `leagues-classic/314/standings/` returns an empty result set: the league was recreated on 2026-07-23 and holds no ranking until a gameweek has been scored, despite 2.28m managers having registered. **There is no top-1,000 to enumerate before GW1 is played.**
+>
+> The design now captures **two cohorts through one mechanism**, stored under separate `cohort=` partitions and never pooled — an ownership percentage computed across both populations would describe nobody.
+>
+> | Cohort | Population | First gameweek | Requests/GW |
+> |---|---|---|---|
+> | `elite` | Top 1,000 of league 314 — a *sample* of a 2.3m field that cannot be enumerated | **GW2** | ~1,020 |
+> | `mini` | Every member of a configured league — the actual opponents, read *exactly* | GW1 | ~20 |
+>
+> **GW1 elite capture is skipped, not reconstructed.** It could be captured retroactively once GW1 is scored, but that cohort would be selected on one gameweek's outcome — mostly noise — and would not mean the same thing as every other week. A silently different definition in one row of a time series is worse than an honest gap. The cost is small: initial-squad selection is a constrained maximisation in which ownership plays no part, pre-season global ownership is an unusually good captaincy proxy, and rolling transfers make an imperfect start cheap to correct.
 
-Added to `FplApiConnector`:
+### 3.1 Manager endpoints — ✅ done
 
-```python
-def classic_league_standings(self, league_id: int, page: int) -> RawArtifact
-def entry_picks(self, entry_id: int, event: int) -> RawArtifact
+Added to `FplApiConnector`: `classic_league_standings`, `entry`, `entry_picks`.
+
+> **`entry/{id}/event/{gw}/picks/` remains unverified.** Probed 30 July: `entry/1/event/38/picks/` returns **404**, confirming prior-season picks are not retained (spec §6.1) — and therefore that it cannot be tested until a live gameweek exists. Live tools depend on it, so it is near-certainly public, but "near-certainly" is not "tested". **Re-probe the moment GW1's deadline passes.** If it needs authentication, that is a design-level problem.
+
+Empty standings are returned as a fact, not raised as a `SchemaError`: emptiness is precisely the pre-season state, and it is the caller's business.
+
+### 3.2 Chunked, resumable raw layout — ✅ done
+
+Actions runners are ephemeral, so resume state must live in the repository:
+
 ```
-
-> **Unverified until the season starts.** `entry/{id}/event/{gw}/picks/` could not be tested during design — 2026/27 had not begun and prior-season picks are not retained (spec §6.1). Live tools depend on it, so it is near-certainly public, but "near-certainly" is not "tested". **Re-probe in early August** and again the moment GW1's deadline passes. If it turns out to need authentication, that is a design-level problem and needs to surface with days of slack, not hours.
-
-### 3.2 Chunked, resumable raw layout
-
-Actions runners are ephemeral, so resume state must live in the repository. Chunking gives that while staying append-only:
-
-```
-data/raw/fpl/entry_picks/season=2026-27/event=1/
+data/raw/fpl/entry_picks/season=2026-27/cohort=elite/event=2/
     chunk=0000/{data.ndjson.gz, meta.json}     entries   1– 100
-    chunk=0001/{data.ndjson.gz, meta.json}     entries 101– 200
     ...
     chunk=0009/                                entries 901–1000
+data/raw/fpl/entry_picks/season=2026-27/cohort=mini/event=1/
+    chunk=0000/                                the whole league
 ```
 
-Resume is simply "which chunk directories already exist" — no lock file, no mutable state, no partial file ever rewritten. A run that dies at entry 640 leaves chunks 0000–0005 intact and the next run starts at 0006. Each chunk's `meta.json` carries its own `as_of`, since chunks may be captured minutes or hours apart.
+Resume is simply "which chunk directories already exist" — no lock file, no mutable state, no partial file ever rewritten. A run that dies at entry 640 leaves chunks 0000–0005 intact and the next starts at 0006. `write_chunk` deliberately does **not** content-address and **never** overwrites: a chunk is identified by index, and its presence *is* the resume protocol.
 
-`league_standings` is stored conventionally, one partition per capture, holding all 20 pages.
-
-### 3.3 Target-event resolution
-
-Pure function, no I/O — the part most likely to be wrong, so it is the part made easiest to test:
+### 3.3 Target-event resolution — ✅ done
 
 ```python
-def resolve_capture_event(bootstrap: dict, now: datetime, existing: set[int]) -> int | None
+def resolve_capture_event(bootstrap, now, captured, *, first_event=1) -> int | None
 ```
 
-Returns the event where `deadline_time < now` **and** `not event.finished` **and** the event is not already fully captured. Otherwise `None`, and the job exits 0 having done nothing.
+Returns the event where `deadline_time < now`, `not finished`, and not already captured. The `first_event` floor is what lets the two cohorts resolve **independently**, so the elite cohort can start at GW2 while the mini cohort starts at GW1.
 
-`finished` is the right bound rather than first kickoff: the rules state automatic substitutions are processed *at the end of the gameweek*, so the capture window is the whole gameweek — days, not the 90 minutes between deadline and kickoff (spec §6.1). The 30-minute schedule then has dozens of chances to complete a 35-minute job, instead of one chance to squeeze inside a narrow slot.
+`finished` is the right bound rather than first kickoff: automatic substitutions are processed at the *end* of the gameweek, so the capture window is the whole gameweek — days, not the 90 minutes between deadline and kickoff (spec §6.1). The 30-minute schedule then has dozens of chances to complete a 35-minute job.
 
-**Tests, table-driven:** before deadline → `None`; inside window → the event; `finished=true` → `None`; already captured → `None`; two events plausibly open (double gameweek boundaries) → the earlier; empty/absent events → `None`, never a crash.
+**Bootstrap is read live and deliberately not persisted.** The job needs current `finished` flags, but it ticks 48 times a day and bootstrap changes constantly in season; persisting each read would commit ~5 MB a day and duplicate the daily snapshot. It falls back to the stored copy when the API is unreachable — deadlines do not move, so a day-old snapshot still resolves the gameweek, and an outage must not cause a capture to be skipped.
 
-### 3.4 Contamination check
+**Tests, table-driven:** before deadline → `None`; inside window → the event; `finished` → `None`; already captured → `None`; double gameweek → the earlier; `first_event` floor respected; malformed rows and naive deadlines → `None`, never a crash.
 
-Each pick payload carries `automatic_subs`, empty until the gameweek completes. **Non-empty means we captured too late and FPL has rewritten the XI.** The record is stored with `contaminated: true` in its chunk metadata rather than being mixed in as though it were a manager's decision.
+### 3.4 Contamination check — ✅ done
 
-This is cheap and it is the difference between "we believe the window logic is right" and "we can prove it was right for every row we kept". Silent contamination here would poison every EO feature downstream, and would be invisible.
+Each pick payload carries `automatic_subs`, empty until the gameweek completes. **Non-empty means we captured too late and FPL has rewritten the XI.** The record is stored with `contaminated: true` rather than mixed in as though it were a manager's decision.
 
-**Test:** a payload with a non-empty `automatic_subs` is flagged; an empty one is not.
+Contamination is *partial*, which is why a late capture is still worth taking: `automatic_subs` names `element_in`/`element_out`, and squad membership and `is_captain` are never rewritten. A late run is degraded, not destroyed.
 
-### 3.5 `fpl ingest fpl --endpoint ownership`
+### 3.5 `fpl capture-ownership` — ✅ done
 
 ```
-fpl ingest fpl --season 2026-27 --endpoint ownership --auto [--top 1000] [--limit N] [--dry-run]
+fpl capture-ownership [--cohort elite|mini|all] [--event N] [--top 1000]
+                      [--league ID] [--limit N] [--dry-run]
 ```
 
-1. Read the newest `bootstrap-static` (pull a fresh one if older than 6 h).
-2. `resolve_capture_event`. If `None`, log `nothing_to_do` and exit 0.
-3. Page `leagues-classic/314/standings` to collect the top *N* entry IDs. Store raw.
-4. For each missing chunk, fetch 100 entries at the configured spacing, flag contamination, write the chunk.
-5. Log progress per chunk so a killed run's position is legible in the Actions log.
+Resolves each cohort's gameweek independently, collects entry IDs, and fills only the missing chunks. Exits 0 with `nothing_to_do` when no gameweek is open — the normal state.
 
-`--limit` caps entries for rehearsal; `--dry-run` resolves the event and prints the plan without fetching. Both exist so the job can be exercised cheaply on the day rather than tested for the first time at full scale.
+The mini-league ID comes from `--league` or `$FPL_MINI_LEAGUE_ID`. A **malformed** value is ignored rather than fatal, so a typo in workflow config cannot take down the daily snapshot, which does not use it. An **absent** value warns and skips the cohort under `--cohort all`, but is a usage error under `--cohort mini`, where the user asked for it explicitly.
 
-**Tests:** pagination across 20 mocked pages; resume skips existing chunks and fetches only the remainder; `--limit` respected; a mid-run `TransientError` leaves completed chunks valid and exits non-zero.
+### 3.6 Workflows — ✅ done, no-op path verified live
 
-### 3.6 Workflows
+Shared composite action `.github/actions/setup/` (uv, `uv sync --locked`). The caller checks out first, since a local action cannot be resolved before its own repository is on disk.
 
-Shared composite action `.github/actions/setup/` (checkout, uv, `uv sync --locked`) to avoid three copies of the same six lines.
+Both workflows share `concurrency: { group: data-write, cancel-in-progress: false }` — queued, never cancelled, because cancelling a half-finished capture is the one failure mode this design exists to prevent.
 
-Both workflows share `concurrency: { group: data-write, cancel-in-progress: false }` — queued, never cancelled, because cancelling a half-finished capture would be the one failure mode this design exists to prevent. Both need `permissions: contents: write`, commit as `github-actions[bot]`, and `git pull --rebase` before pushing.
+**`daily-snapshot.yml`** — `30 3 * * *`. Verified end-to-end in production: Cloudflare did not block the runner, the bot pushed to `master`, and content addressing skipped `fixtures` as unchanged while writing `bootstrap_static`.
 
-**`daily-snapshot.yml`** — `30 3 * * *`. Ingests `bootstrap-static` and `fixtures`. Two requests. Runs after FPL's 01:30–02:30 UK price update (spec §3).
+**`capture-ownership.yml`** — `*/30 * * * *` plus `workflow_dispatch` with `cohort`, `limit` and `dry_run`. Dispatch inputs are passed through `env:` rather than interpolated into the script body. Runtime cap 90 min. Verified to resolve, find nothing open, and write nothing.
 
-**`capture-ownership.yml`** — `*/30 * * * *`, plus `workflow_dispatch` with `limit` and `dry_run` inputs. Almost every run exits within seconds having found nothing to do; Actions minutes are unlimited on a public repo, so frequency is free. Runtime cap 90 min.
+**Failure notification.** On failure a step opens — or comments on — a single issue labelled `ownership-capture`. One reused issue, not one per run, which would be thirty issues a day if the API changed shape.
 
-**Failure notification.** A reusable step opens or reuses a GitHub Issue on failure (spec §10). Implemented for `capture-ownership` in this phase — it is the job where silent failure is unrecoverable. The other workflows adopt it in phase 9.
+### 3.7 Rehearsal — 17–20 Aug — ⬜ outstanding
 
-### 3.7 Rehearsal — 17–20 Aug
+The no-op path, dispatch inputs, permissions, commit and push are all verified. **The capture path itself is not, and cannot be until a gameweek is open** — league 314 is empty and picks 404. What remains for August is a `--limit 20` run against real, live data.
 
-Before the season starts, dry-run against a synthetic `bootstrap-static` with a manufactured open event, using a mock server, end to end through the real workflow via `workflow_dispatch`. This exercises scheduling, permissions, committing and pushing — the parts unit tests cannot reach — while there is still time to fix them.
-
-**Phase 3 exit criteria:** `capture-ownership` scheduled and passing on `master`; a rehearsal run has committed and pushed; failure-to-issue verified by deliberately breaking a run once.
+**Phase 3 exit criteria:** ~~scheduled and passing on `master`~~ ✅; ~~a rehearsal run has committed and pushed~~ ✅ (via daily-snapshot and the capture job's own commit step); failure-to-issue verified by deliberately breaking a run once ✅.
 
 ---
 
@@ -292,11 +292,12 @@ Before the season starts, dry-run against a synthetic `bootstrap-static` with a 
 
 | When | Action | Why it cannot slip |
 |---|---|---|
-| Early Aug | Re-probe `entry/{id}/event/{gw}/picks/` | The one unverified assumption in the design (§3.1). Needs days of slack, not hours. |
-| By 16 Aug | Phases 1–3 merged to `master`, workflows scheduled | Leaves a rehearsal buffer. |
-| 17–20 Aug | Rehearsal via `workflow_dispatch` | Permissions, push and scheduling are untestable locally. |
-| **21 Aug, deadline + 15 min** | `workflow_dispatch` with `limit: 20`, inspect output | A 2-minute end-to-end check on real data before trusting the full 35-minute run. |
-| **21 Aug, deadline + 45 min** | Confirm the scheduled full run completed and committed 10 chunks | **GW1 picks are unrecoverable after the gameweek finishes.** |
+| ~~Early Aug~~ | ~~Re-probe `entry/{id}/event/{gw}/picks/`~~ — impossible before GW1; 404 confirms the endpoint has no data to serve | Moved to 21 Aug. |
+| By 16 Aug | ~~Phases 1–3 merged to `master`, workflows scheduled~~ ✅ done 30 July | Leaves a rehearsal buffer. |
+| Before GW1 | Set `vars.FPL_MINI_LEAGUE_ID` once the office league exists | The mini cohort is the one that starts at GW1, and it is the league that actually matters. |
+| **21 Aug, deadline + 15 min** | `workflow_dispatch` with `limit: 20`; **verify `entry_picks` returns 200** | First contact with real data, and the last unverified assumption in the design. |
+| **21 Aug, deadline + 45 min** | Confirm the scheduled run committed the mini cohort | **GW1 picks are unrecoverable after the season ends.** |
+| **GW2** | Confirm the elite cohort activates now that league 314 has a ranking | The elite cohort has never run; GW2 is its first execution. |
 | Each subsequent GW | Confirm chunks landed; investigate any `contaminated: true` | Same irreversibility, every week. |
 
 ---
