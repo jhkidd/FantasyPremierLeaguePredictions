@@ -220,7 +220,14 @@ A high-EV player that almost everyone owns and captains protects rank but cannot
 
 **This dataset is use-it-or-lose-it.** FPL does not retain manager picks across seasons: once 2026/27 ends, its picks are gone, and no public archive reconstructs them. Unlike every other source in this design, effective ownership **cannot be backfilled**. If capture does not begin at gameweek 1, neither EO features nor any backtest of rank-optimised decisions is possible for that season.
 
-**Capture design.** Immediately after each deadline, page through the overall league (`leagues-classic/314/standings`, 50 entries per page) to collect the top 1,000 entry IDs, then fetch `entry/{id}/event/{gw}/picks/` for each. Roughly 1,020 requests at 2s spacing — about 35 minutes, once per gameweek. Picks are captured *after the deadline but before matches*, so the recorded captain and starting XI reflect the manager's actual decision rather than the post-hoc result of automatic substitutions.
+**Capture design.** After each deadline, page through the overall league (`leagues-classic/314/standings`, 50 entries per page) to collect the top 1,000 entry IDs, then fetch `entry/{id}/event/{gw}/picks/` for each. Roughly 1,020 requests at 2s spacing — about 35 minutes, once per gameweek.
+
+**The capture window is the whole gameweek, not the 90 minutes before kickoff.** The rules state that automatic substitutions are *processed at the end of the gameweek*, so a team's recorded starting XI and captain reflect the manager's actual decision at any point from the deadline until the gameweek's last match finishes — a window of two to three days rather than ninety minutes. Two consequences follow, and both matter:
+
+- The job can be scheduled generously and retried repeatedly, instead of having to land inside a narrow slot with a 35-minute runtime.
+- Correctness must still be *asserted*, not assumed. Each captured pick set carries an `automatic_subs` array which is empty until the gameweek completes. **A non-empty `automatic_subs` means the capture ran too late and the XI has been rewritten** — the record is marked contaminated rather than silently stored as if it were a decision.
+
+The set of entries is stable across the window for the same reason: FPL's official ranks do not update live during a gameweek, so `leagues-classic/314/standings` returns the previous gameweek's confirmed ranking throughout. Capturing early and capturing late select the same 1,000 managers.
 
 Top-1,000 is a deliberate approximation of the top-10k benchmark that community tools use: it is an order of magnitude cheaper and its bias is known and consistent, which is what matters for a feature used comparatively.
 
@@ -258,7 +265,7 @@ Two kinds of time exist in the facts layer, and `as_of` filters both.
 | `daily-snapshot` | 03:30 UTC daily | Runs after FPL's nightly price run. Pulls `bootstrap-static` and `fixtures` — two requests. Captures prices, ownership, injury news, status. |
 | `post-gameweek` | 09:30 UTC daily | FPL finalises a gameweek at 09:00 UK the day after its last match. Checks whether a gameweek just locked; if so pulls `event/{gw}/live` (all players, one request), rebuilds facts, and reconciles derived points against FPL's. Once models exist it also appends predicted-vs-realised to `monitoring/`; until then that step is inert. Exits in seconds otherwise. |
 | `pre-deadline` | Hourly, Thu–Sun | Reads the real deadline from `events` and no-ops unless within the window. Refreshes availability. Once models exist it runs inference and publishes predictions; until then it publishes `status.json` only. Cron cannot express "90 minutes before a moving kickoff", so the job decides. |
-| `capture-ownership` | Hourly, Sat–Sun | Fires once per gameweek, after that gameweek's deadline has passed and before its first kickoff. Collects the top 1,000 overall entries and their picks (§6.1). ~35 minutes. **The one job that cannot be missed** — the data it captures is unrecoverable afterwards. Failure raises an issue immediately rather than waiting for the next scheduled run. |
+| `capture-ownership` | Every 30 min | Fires once per gameweek, after that gameweek's deadline and before its last match finishes (§6.1). Collects the top 1,000 overall entries and their picks. ~35 minutes, resumable. **The one job that cannot be missed** — the data it captures is unrecoverable afterwards, so it runs frequently, resumes partial progress, and raises an issue immediately on failure rather than waiting for the next run. |
 | `weekly-context` | Mondays | Understat (all six leagues), Club Elo, football-data.co.uk, cup and European fixture schedules. Slower-moving sources. |
 | `backfill` | Manual dispatch | Cold start and repair. Polite 3s spacing. A full `element-summary` sweep of ~700 players takes roughly 35 minutes, which is why routine jobs never perform one. |
 
