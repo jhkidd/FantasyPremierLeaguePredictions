@@ -1,0 +1,60 @@
+name: Daily snapshot
+
+# Pre-season price and ownership movement is use-it-or-lose-it: FPL publishes
+# only the current value of every field, so a day not captured is a day gone.
+# This runs from now rather than from phase 3 for that reason (spec §8).
+
+on:
+  schedule:
+    # 03:30 UTC, after FPL's nightly price update (~01:30 UK) has settled.
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Write a snapshot even if nothing changed"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# Never cancel: a cancelled run that has written one endpoint but not the other
+# leaves the commit half-made. Queue instead, and share one group with every
+# other workflow that writes to data/ so two jobs cannot race on a push.
+concurrency:
+  group: data-write
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Ingest
+        run: uv run fpl --verbose ingest fpl ${{ inputs.force && '--force' || '' }}
+
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/
+          if git diff --cached --quiet; then
+            echo "No change upstream; nothing to commit."
+            exit 0
+          fi
+          git commit -m "data: daily snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+          # Rebase rather than merge: the raw tree is append-only, so a
+          # concurrent snapshot adds files beside ours and never conflicts.
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

@@ -17,6 +17,8 @@ import typer
 
 from fpl import __version__, exit_codes, log
 from fpl.config import CURRENT_SEASON, Season
+from fpl.ingest import ingest_fpl
+from fpl.sources.errors import BlockedError, SchemaError, SourceError
 
 app = typer.Typer(
     name="fpl",
@@ -35,6 +37,10 @@ def _pending(phase: int, what: str) -> None:
         fg=typer.colors.YELLOW,
     )
     raise typer.Exit(exit_codes.NOT_IMPLEMENTED)
+
+
+def _data_root(ctx: typer.Context) -> Path | None:
+    return (ctx.obj or {}).get("data_root")
 
 
 def _parse_season(value: str) -> Season:
@@ -71,14 +77,56 @@ def version() -> None:
 
 @app.command()
 def ingest(
+    ctx: typer.Context,
     source: Annotated[str, typer.Argument(help="Source name, e.g. 'fpl'.")],
     season: SeasonOption = str(CURRENT_SEASON),
-    endpoint: Annotated[str | None, typer.Option("--endpoint")] = None,
+    endpoint: Annotated[
+        str | None,
+        typer.Option("--endpoint", help="Endpoint to pull. Omit for the routine set."),
+    ] = None,
     event: Annotated[int | None, typer.Option("--event", help="Gameweek number.")] = None,
+    player: Annotated[int | None, typer.Option("--player", help="FPL element id.")] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="Write even if the content is unchanged.")
+    ] = False,
 ) -> None:
     """Pull from a source into data/raw/."""
-    _parse_season(season)
-    _pending(2, f"ingest {source}" + (f" --endpoint {endpoint}" if endpoint else ""))
+    parsed = _parse_season(season)
+
+    if source != "fpl":
+        _pending(7, f"ingest {source}")
+
+    try:
+        results = ingest_fpl(
+            parsed,
+            [endpoint] if endpoint else None,
+            event=event,
+            player_id=player,
+            data_root=_data_root(ctx),
+            force=force,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except BlockedError as exc:
+        # Distinct exit code so the workflow can raise an issue immediately
+        # rather than retrying into the block (spec §10, §13).
+        typer.secho(
+            f"Blocked by the source: {exc} (cloudflare={exc.looks_like_cloudflare}). Not retrying.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(exit_codes.BLOCKED) from exc
+    except SchemaError as exc:
+        typer.secho(f"Source schema changed: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(exit_codes.SCHEMA_CHANGED) from exc
+    except SourceError as exc:
+        typer.secho(f"Fetch failed: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(exit_codes.FAILURE) from exc
+
+    written = sum(1 for result in results if result.written)
+    typer.echo(
+        f"{len(results)} endpoint(s) pulled, {written} written, {len(results) - written} unchanged"
+    )
 
 
 @app.command()

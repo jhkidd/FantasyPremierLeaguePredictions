@@ -29,6 +29,9 @@ def configure(*, verbose: bool = False) -> None:
     # Log in UTC. Runners are UTC and laptops are not; one timezone in the
     # logs is worth more than local readability.
     logging.Formatter.converter = time.gmtime
+    # httpx logs every request at INFO. Ours already log what matters, with
+    # more context, and a backfill would otherwise emit hundreds of lines.
+    logging.getLogger("httpx").setLevel(logging.DEBUG if verbose else logging.WARNING)
     _configured = True
 
 
