@@ -44,7 +44,9 @@ def main() -> int:
                 top10k = sum(1 for r in ranks if r <= 10_000)
             else:
                 median, top100k, top10k = "-", 0, 0
-            print(f"{start:>9,} {len(ranks):>3}/{PER_BAND:<3} {median:>12} {top100k:>8} {top10k:>7}")
+            print(
+                f"{start:>9,} {len(ranks):>3}/{PER_BAND:<3} {median:>12} {top100k:>8} {top10k:>7}"
+            )
     return 0
 
 

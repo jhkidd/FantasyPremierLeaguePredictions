@@ -73,10 +73,17 @@ def raw_endpoint_dir(
     endpoint: str,
     season: Season,
     *,
+    cohort: str | None = None,
     event: int | None = None,
     data_root: Path | None = None,
 ) -> Path:
-    """The directory holding every capture of one endpoint, for one season."""
+    """The directory holding every capture of one endpoint, for one season.
+
+    ``cohort`` separates populations captured from the same endpoint that must
+    never be pooled — the elite top 1,000 and a mini-league are both entry
+    picks, but an ownership percentage computed across the two of them would be
+    meaningless (spec §6.1).
+    """
     path = (
         _root(data_root)
         / "raw"
@@ -84,6 +91,8 @@ def raw_endpoint_dir(
         / _normalise_endpoint(endpoint)
         / f"season={season}"
     )
+    if cohort is not None:
+        path = path / f"cohort={_check_component(cohort, label='cohort')}"
     if event is not None:
         path = path / f"event={int(event)}"
     return path
@@ -95,11 +104,14 @@ def raw_partition(
     season: Season,
     as_of: datetime,
     *,
+    cohort: str | None = None,
     event: int | None = None,
     data_root: Path | None = None,
 ) -> Path:
     """The directory for a single capture at a single moment."""
-    parent = raw_endpoint_dir(source, endpoint, season, event=event, data_root=data_root)
+    parent = raw_endpoint_dir(
+        source, endpoint, season, cohort=cohort, event=event, data_root=data_root
+    )
     return parent / f"as_of={encode_as_of(as_of)}"
 
 
@@ -109,6 +121,7 @@ def chunk_partition(
     season: Season,
     chunk: int,
     *,
+    cohort: str | None = None,
     event: int | None = None,
     data_root: Path | None = None,
 ) -> Path:
@@ -121,7 +134,9 @@ def chunk_partition(
     """
     if chunk < 0:
         raise ValueError(f"chunk index must not be negative: {chunk}")
-    parent = raw_endpoint_dir(source, endpoint, season, event=event, data_root=data_root)
+    parent = raw_endpoint_dir(
+        source, endpoint, season, cohort=cohort, event=event, data_root=data_root
+    )
     return parent / f"chunk={chunk:04d}"
 
 
@@ -130,6 +145,7 @@ def latest_partition(
     endpoint: str,
     season: Season,
     *,
+    cohort: str | None = None,
     event: int | None = None,
     data_root: Path | None = None,
 ) -> Path | None:
@@ -139,7 +155,9 @@ def latest_partition(
     the raw tree stays purely append-only — there is no mutable file to fall out
     of step with reality.
     """
-    parent = raw_endpoint_dir(source, endpoint, season, event=event, data_root=data_root)
+    parent = raw_endpoint_dir(
+        source, endpoint, season, cohort=cohort, event=event, data_root=data_root
+    )
     if not parent.is_dir():
         return None
     partitions = [p for p in parent.iterdir() if p.is_dir() and p.name.startswith("as_of=")]
@@ -151,11 +169,14 @@ def iter_chunks(
     endpoint: str,
     season: Season,
     *,
+    cohort: str | None = None,
     event: int | None = None,
     data_root: Path | None = None,
 ) -> Iterator[tuple[int, Path]]:
     """Yield ``(index, path)`` for every chunk already captured, in order."""
-    parent = raw_endpoint_dir(source, endpoint, season, event=event, data_root=data_root)
+    parent = raw_endpoint_dir(
+        source, endpoint, season, cohort=cohort, event=event, data_root=data_root
+    )
     if not parent.is_dir():
         return
     chunks = [p for p in parent.iterdir() if p.is_dir() and p.name.startswith("chunk=")]

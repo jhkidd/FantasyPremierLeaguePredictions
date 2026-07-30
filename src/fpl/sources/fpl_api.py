@@ -100,6 +100,52 @@ class FplApiConnector:
             raise SchemaError(f"element-summary/{player_id} should carry a 'history' key")
         return self._artifact("element_summary", response, params={"player_id": player_id})
 
+    # -- manager endpoints (spec §6.1) -----------------------------------
+
+    def classic_league_standings(self, league_id: int, page: int = 1) -> RawArtifact:
+        """One page of a classic league's table, 50 entries per page.
+
+        Empty results are *not* a schema error. The overall league carries no
+        standings until a gameweek has been scored, and a mini-league carries
+        none until its members join, so both legitimately return zero rows.
+        Emptiness is a fact for the caller to act on, not a malformed response.
+        """
+        params = {"page_standings": page}
+        response = self.fetcher.get(
+            f"{self.base_url}/leagues-classic/{league_id}/standings/", params=params
+        )
+        payload = self._parse(response)
+        if not isinstance(payload, Mapping) or "standings" not in payload:
+            raise SchemaError(f"leagues-classic/{league_id} should carry a 'standings' key")
+        if not isinstance(payload["standings"], Mapping):
+            raise SchemaError(f"leagues-classic/{league_id} 'standings' should be an object")
+        return self._artifact(
+            "league_standings", response, params={"league_id": league_id, "page": page}
+        )
+
+    def entry(self, entry_id: int) -> RawArtifact:
+        """One manager's profile. Carries `leagues`, which is how a configured
+        mini-league is discovered from its numeric ID rather than its join code."""
+        response = self.fetcher.get(f"{self.base_url}/entry/{entry_id}/")
+        payload = self._parse(response)
+        if not isinstance(payload, Mapping) or "id" not in payload:
+            raise SchemaError(f"entry/{entry_id} should carry an 'id' key")
+        return self._artifact("entry", response, params={"entry_id": entry_id})
+
+    def entry_picks(self, entry_id: int, event: int) -> RawArtifact:
+        """One manager's squad for one gameweek.
+
+        The perishable endpoint: FPL does not retain picks across seasons, and
+        no archive reconstructs them (spec §6.1).
+        """
+        response = self.fetcher.get(f"{self.base_url}/entry/{entry_id}/event/{event}/picks/")
+        payload = self._parse(response)
+        if not isinstance(payload, Mapping) or "picks" not in payload:
+            raise SchemaError(f"entry/{entry_id}/event/{event}/picks should carry a 'picks' key")
+        if not isinstance(payload["picks"], list) or not payload["picks"]:
+            raise SchemaError(f"entry/{entry_id}/event/{event}/picks returned no picks")
+        return self._artifact("entry_picks", response, params={"entry_id": entry_id}, event=event)
+
     # -- helpers ---------------------------------------------------------
 
     def _parse(self, response: FetchResponse) -> Any:

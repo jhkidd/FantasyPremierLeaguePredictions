@@ -17,7 +17,7 @@ from fpl.storage.paths import (
     raw_partition,
     staged_table,
 )
-from fpl.storage.raw_io import RawArtifact, WriteResult, read_raw, write_raw
+from fpl.storage.raw_io import RawArtifact, WriteResult, read_raw, write_chunk, write_raw
 
 __all__ = [
     "RawArtifact",
@@ -34,6 +34,7 @@ __all__ = [
     "read_parquet",
     "read_raw",
     "staged_table",
+    "write_chunk",
     "write_parquet",
     "write_raw",
 ]

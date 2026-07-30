@@ -1,0 +1,111 @@
+name: Capture ownership
+
+# The one job that cannot be missed within a season. FPL does not retain
+# manager picks across seasons and no archive reconstructs them (spec §6.1),
+# so this runs often, resumes partial progress, and shouts on failure rather
+# than quietly waiting for the next attempt.
+
+on:
+  schedule:
+    # Almost every run exits within seconds having found no open gameweek.
+    # Actions minutes are unlimited on a public repo, so frequency is free.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      cohort:
+        description: "Which rivals to capture"
+        type: choice
+        options: [all, mini, elite]
+        default: all
+      limit:
+        description: "Cap entries per cohort (rehearsal)"
+        type: string
+        default: ""
+      dry_run:
+        description: "Resolve the target and print the plan only"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+
+# Shared with daily-snapshot so two jobs cannot race on a push, and never
+# cancelled: cancelling a half-finished capture is the exact failure this
+# design exists to prevent.
+concurrency:
+  group: data-write
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    # Full elite capture is ~1,020 requests at 2s spacing, about 35 minutes.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+
+      # Capture reads the stored bootstrap to decide which gameweek is open,
+      # so a stale snapshot would mean capturing the wrong week. Refresh first.
+      - name: Refresh bootstrap
+        run: uv run fpl ingest fpl --endpoint bootstrap-static
+
+      - name: Capture
+        env:
+          FPL_MINI_LEAGUE_ID: ${{ vars.FPL_MINI_LEAGUE_ID }}
+          # Read through the environment rather than interpolated into the
+          # script body: a dispatch input is arbitrary text, and pasting it
+          # into bash makes a stray quote a syntax error and worse a
+          # command substitution.
+          COHORT: ${{ inputs.cohort || 'all' }}
+          LIMIT: ${{ inputs.limit }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          args=(--cohort "$COHORT")
+          [ -n "$LIMIT" ] && args+=(--limit "$LIMIT")
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          uv run fpl --verbose capture-ownership "${args[@]}"
+
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/
+          if git diff --cached --quiet; then
+            echo "Nothing captured this run."
+            exit 0
+          fi
+          git commit -m "data: ownership capture $(date -u +%Y-%m-%dT%H:%MZ)"
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      # Silent failure here is unrecoverable, so it becomes a notification.
+      # One issue is reused rather than one per failed run, which would be
+      # thirty issues a day if the API changed shape.
+      - name: Raise an issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Ownership capture failed"
+          existing=$(gh issue list --state open --label ownership-capture \
+            --json number --jq '.[0].number' || echo "")
+          body=$(printf '%s\n' \
+            "Run failed: ${RUN_URL}" \
+            "" \
+            "Ownership data cannot be recovered after the season ends (spec 6.1)." \
+            "Check whether a gameweek is currently open before dismissing this.")
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh label create ownership-capture --color b60205 \
+              --description "Unrecoverable data capture" 2>/dev/null || true
+            gh issue create --title "$title" --body "$body" --label ownership-capture
+          fi

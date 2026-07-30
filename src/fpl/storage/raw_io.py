@@ -23,9 +23,22 @@ from typing import Any
 
 from fpl.config import Season
 from fpl.storage.atomic import atomic_write_bytes
-from fpl.storage.paths import decode_as_of, encode_as_of, latest_partition, raw_partition
+from fpl.storage.paths import (
+    chunk_partition,
+    decode_as_of,
+    encode_as_of,
+    latest_partition,
+    raw_partition,
+)
 
-__all__ = ["META_FILENAME", "RawArtifact", "WriteResult", "read_raw", "write_raw"]
+__all__ = [
+    "META_FILENAME",
+    "RawArtifact",
+    "WriteResult",
+    "read_raw",
+    "write_chunk",
+    "write_raw",
+]
 
 META_FILENAME = "meta.json"
 
@@ -49,6 +62,9 @@ class RawArtifact:
     connector_version: str
     params: Mapping[str, Any] = field(default_factory=dict)
     event: int | None = None
+    cohort: str | None = None
+    """Population this capture describes, when one endpoint serves several
+    that must never be pooled (spec §6.1)."""
     content_type: str = "json"
     """File extension beneath the ``.gz``. ``json`` or ``ndjson``."""
 
@@ -74,6 +90,7 @@ class WriteResult:
 
 def _meta_dict(artifact: RawArtifact, *, compressed_bytes: int) -> dict[str, Any]:
     return {
+        "cohort": artifact.cohort,
         "compressed_bytes": compressed_bytes,
         "connector_version": artifact.connector_version,
         "content_type": artifact.content_type,
@@ -123,6 +140,7 @@ def write_raw(
             artifact.source,
             artifact.endpoint,
             artifact.season,
+            cohort=artifact.cohort,
             event=artifact.event,
             data_root=data_root,
         )
@@ -136,6 +154,7 @@ def write_raw(
         artifact.endpoint,
         artifact.season,
         artifact.fetched_at,
+        cohort=artifact.cohort,
         event=artifact.event,
         data_root=data_root,
     )
@@ -154,6 +173,47 @@ def write_raw(
     atomic_write_bytes(partition / META_FILENAME, meta_bytes)
 
     return WriteResult(partition, written=True, reason="new" if not force else "forced")
+
+
+def write_chunk(
+    artifact: RawArtifact,
+    chunk: int,
+    *,
+    extra_meta: Mapping[str, Any] | None = None,
+    data_root: Path | None = None,
+) -> WriteResult:
+    """Persist one chunk of a resumable capture.
+
+    Unlike :func:`write_raw` there is no content addressing: a chunk is
+    identified by its index, and two chunks holding identical bytes are still
+    different chunks. An existing chunk is never overwritten, because its
+    presence is the resume protocol (spec §6.1) — rewriting it would silently
+    discard the very state the next run depends on.
+    """
+    partition = chunk_partition(
+        artifact.source,
+        artifact.endpoint,
+        artifact.season,
+        chunk,
+        cohort=artifact.cohort,
+        event=artifact.event,
+        data_root=data_root,
+    )
+    if (partition / META_FILENAME).is_file():
+        return WriteResult(partition, written=False, reason="already_captured")
+
+    compressed = gzip.compress(artifact.body, compresslevel=_GZIP_LEVEL, mtime=_GZIP_MTIME)
+    atomic_write_bytes(partition / artifact.filename, compressed)
+
+    meta = _meta_dict(artifact, compressed_bytes=len(compressed))
+    meta["chunk"] = chunk
+    meta.update(extra_meta or {})
+    meta_bytes = (
+        json.dumps(meta, sort_keys=True, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+    )
+    atomic_write_bytes(partition / META_FILENAME, meta_bytes)
+
+    return WriteResult(partition, written=True, reason="new")
 
 
 def read_raw(partition: Path) -> tuple[bytes, dict[str, Any]]:

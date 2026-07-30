@@ -14,6 +14,7 @@ from typing import Final
 
 __all__ = [
     "CURRENT_SEASON",
+    "DEFAULT_ELITE_COHORT_SIZE",
     "FIRST_ARCHIVE_SEASON",
     "SOURCES",
     "USER_AGENT",
@@ -98,12 +99,21 @@ SOURCES: Final[dict[str, SourceConfig]] = {
 
 DEFAULT_DATA_ROOT: Final = Path("data")
 DATA_ROOT_ENV_VAR: Final = "FPL_DATA_ROOT"
+MINI_LEAGUE_ENV_VAR: Final = "FPL_MINI_LEAGUE_ID"
+
+DEFAULT_ELITE_COHORT_SIZE: Final = 1000
+"""Entries sampled from the overall league. A cheaper stand-in for the top-10k
+benchmark community tools use; the bias is known and consistent, which is what
+matters for a feature used comparatively (spec §6.1)."""
 
 
 @dataclass(frozen=True)
 class Config:
     data_root: Path
     user_agent: str = USER_AGENT
+    mini_league_id: int | None = None
+    """The user's own mini-league. Configuration rather than a constant because
+    it differs per user and is not known until they join (spec §6.1)."""
 
     @classmethod
     def load(cls) -> Config:
@@ -115,10 +125,27 @@ class Config:
         """
         raw_root = os.environ.get(DATA_ROOT_ENV_VAR)
         data_root = Path(raw_root) if raw_root else DEFAULT_DATA_ROOT
-        return cls(data_root=data_root)
+        return cls(data_root=data_root, mini_league_id=_read_league_id())
 
     def source(self, name: str) -> SourceConfig:
         try:
             return SOURCES[name]
         except KeyError:
             raise KeyError(f"unknown source {name!r}; known: {sorted(SOURCES)}") from None
+
+
+def _read_league_id() -> int | None:
+    """A malformed league ID is ignored rather than fatal.
+
+    The variable is set from workflow configuration, and a typo there must not
+    take down the daily snapshot, which does not use it. Capture surfaces its
+    absence explicitly when it actually needs one.
+    """
+    raw = os.environ.get(MINI_LEAGUE_ENV_VAR, "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None

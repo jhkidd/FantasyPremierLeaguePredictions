@@ -1,0 +1,17 @@
+name: Set up the fpl toolchain
+description: uv and a locked dependency install. The caller checks out first, since a local action cannot be resolved before its own repository is on disk.
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
+    # --locked fails if uv.lock is out of step with pyproject.toml. Spec §9
+    # requires local and Actions to share one resolved environment, since a
+    # model artefact is only loadable by a compatible library stack.
+    - name: Install dependencies
+      shell: bash
+      run: uv sync --locked

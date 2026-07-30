@@ -48,7 +48,9 @@ def sample(client: httpx.Client, ids: list[int], label: str) -> None:
         time.sleep(1.0)
 
     print(f"\n--- {label} (n={len(ids)}) ---")
-    print(f"  played last season: {len(ranks)}/{len(ids)}   any history: {veterans}   new: {missing}")
+    print(
+        f"  played last season: {len(ranks)}/{len(ids)}   any history: {veterans}   new: {missing}"
+    )
     if ranks:
         ranks.sort()
         print(f"  median rank: {statistics.median(ranks):,.0f}")

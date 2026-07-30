@@ -33,8 +33,14 @@ def main() -> int:
         print("\n--- with phase params ---")
         for query in ("?phase=1", "?page_standings=1&phase=1", "?page_new_entries=1"):
             status, body = get(client, f"/leagues-classic/314/standings/{query}")
-            count = len(body.get("standings", {}).get("results", [])) if isinstance(body, dict) else "-"
-            new = len(body.get("new_entries", {}).get("results", [])) if isinstance(body, dict) else "-"
+            count = (
+                len(body.get("standings", {}).get("results", [])) if isinstance(body, dict) else "-"
+            )
+            new = (
+                len(body.get("new_entries", {}).get("results", []))
+                if isinstance(body, dict)
+                else "-"
+            )
             print(f"{status}  {query}  standings={count} new_entries={new}")
 
         print("\n--- entry/1 history ---")
@@ -62,7 +68,8 @@ def main() -> int:
             print(f"  is_current={[e['id'] for e in live]} is_next={[e['id'] for e in nxt]}")
             if events:
                 first = events[0]
-                print(f"  event1: {json.dumps({k: first[k] for k in ('id','deadline_time','finished','data_checked','is_previous','is_current','is_next')})}")
+                keys = ("id", "deadline_time", "finished", "data_checked", "is_next")
+                print(f"  event1: {json.dumps({k: first[k] for k in keys})}")
     return 0
 
 

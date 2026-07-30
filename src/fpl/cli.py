@@ -10,15 +10,36 @@ so the intended surface is visible and honestly unfinished rather than absent.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from fpl import __version__, exit_codes, log
-from fpl.config import CURRENT_SEASON, Season
+from fpl.config import (
+    CURRENT_SEASON,
+    DEFAULT_ELITE_COHORT_SIZE,
+    MINI_LEAGUE_ENV_VAR,
+    Config,
+    Season,
+)
 from fpl.ingest import ingest_fpl
+from fpl.ownership import (
+    ELITE_COHORT,
+    ELITE_FIRST_EVENT,
+    MINI_COHORT,
+    CaptureTarget,
+    capture_ownership,
+    elite_target,
+    load_latest_bootstrap,
+    mini_target,
+    resolve_capture_event,
+)
 from fpl.sources.errors import BlockedError, SchemaError, SourceError
+from fpl.storage import paths
 
 app = typer.Typer(
     name="fpl",
@@ -41,6 +62,32 @@ def _pending(phase: int, what: str) -> None:
 
 def _data_root(ctx: typer.Context) -> Path | None:
     return (ctx.obj or {}).get("data_root")
+
+
+@contextmanager
+def _source_failures() -> Iterator[None]:
+    """Map source failures onto the exit-code contract.
+
+    Workflows branch on these: a block needs a human and must not be retried, a
+    schema change needs a code change, everything else is worth retrying.
+    """
+    try:
+        yield
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except BlockedError as exc:
+        typer.secho(
+            f"Blocked by the source: {exc} (cloudflare={exc.looks_like_cloudflare}). Not retrying.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(exit_codes.BLOCKED) from exc
+    except SchemaError as exc:
+        typer.secho(f"Source schema changed: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(exit_codes.SCHEMA_CHANGED) from exc
+    except SourceError as exc:
+        typer.secho(f"Fetch failed: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(exit_codes.FAILURE) from exc
 
 
 def _parse_season(value: str) -> Season:
@@ -127,6 +174,150 @@ def ingest(
     typer.echo(
         f"{len(results)} endpoint(s) pulled, {written} written, {len(results) - written} unchanged"
     )
+
+
+@app.command("capture-ownership")
+def capture_ownership_command(
+    ctx: typer.Context,
+    season: SeasonOption = str(CURRENT_SEASON),
+    cohort: Annotated[str, typer.Option("--cohort", help="'elite', 'mini', or 'all'.")] = "all",
+    event: Annotated[
+        int | None,
+        typer.Option("--event", help="Gameweek. Omit to resolve the open one automatically."),
+    ] = None,
+    top: Annotated[
+        int, typer.Option("--top", help="Elite cohort size.")
+    ] = DEFAULT_ELITE_COHORT_SIZE,
+    league: Annotated[
+        int | None,
+        typer.Option("--league", help=f"Mini-league ID. Defaults to ${MINI_LEAGUE_ENV_VAR}."),
+    ] = None,
+    limit: Annotated[
+        int | None, typer.Option("--limit", help="Cap entries per cohort, for rehearsal.")
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Resolve the target and print the plan only.")
+    ] = False,
+) -> None:
+    """Capture rival squads for the open gameweek (spec §6.1).
+
+    Runs every 30 minutes and does nothing on almost every invocation. Exits 0
+    when there is no open gameweek, because "nothing to capture" is the normal
+    state, not a failure.
+    """
+    parsed = _parse_season(season)
+    if cohort not in {"elite", "mini", "all"}:
+        raise typer.BadParameter(f"unknown cohort {cohort!r}; expected elite, mini or all")
+
+    data_root = _data_root(ctx)
+    config = Config.load()
+    league_id = league if league is not None else config.mini_league_id
+
+    bootstrap = load_latest_bootstrap(parsed, data_root=data_root)
+    if bootstrap is None:
+        typer.secho(
+            "No stored bootstrap-static. Run 'fpl ingest fpl' first.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(exit_codes.FAILURE)
+
+    targets = _capture_targets(
+        parsed, bootstrap, cohort, event=event, top=top, league_id=league_id, data_root=data_root
+    )
+    if not targets:
+        typer.echo("nothing_to_do: no gameweek is open for capture")
+        raise typer.Exit(exit_codes.SUCCESS)
+
+    for target in targets:
+        if dry_run:
+            typer.echo(
+                f"would capture cohort={target.cohort} league={target.league_id} "
+                f"event={target.event} top={target.top} limit={limit}"
+            )
+            continue
+        with _source_failures():
+            outcome = capture_ownership(parsed, target, data_root=data_root, limit=limit)
+        typer.echo(
+            f"cohort={outcome.target.cohort} event={outcome.target.event} "
+            f"entries={outcome.entries} chunks_written={outcome.chunks_written} "
+            f"resumed={outcome.chunks_skipped} contaminated={outcome.contaminated}"
+        )
+
+
+def _capture_targets(
+    season: Season,
+    bootstrap: dict,
+    cohort: str,
+    *,
+    event: int | None,
+    top: int,
+    league_id: int | None,
+    data_root: Path | None,
+) -> list[CaptureTarget]:
+    """Decide what to capture, honouring each cohort's earliest gameweek.
+
+    The cohorts resolve their gameweek independently: the elite cohort cannot
+    start before gameweek 2 because the overall league has no ranking until one
+    has been scored, while a mini-league is enumerable from gameweek 1.
+    """
+    targets: list[CaptureTarget] = []
+
+    if cohort in {"mini", "all"}:
+        if league_id is None:
+            if cohort == "mini":
+                raise typer.BadParameter(
+                    f"no mini-league configured; pass --league or set ${MINI_LEAGUE_ENV_VAR}"
+                )
+            typer.secho(
+                f"No mini-league configured (${MINI_LEAGUE_ENV_VAR} unset); skipping that cohort.",
+                err=True,
+                fg=typer.colors.YELLOW,
+            )
+        else:
+            resolved = event or _open_event(season, bootstrap, MINI_COHORT, 1, data_root=data_root)
+            if resolved is not None:
+                targets.append(mini_target(league_id, resolved))
+
+    if cohort in {"elite", "all"}:
+        resolved = event or _open_event(
+            season, bootstrap, ELITE_COHORT, ELITE_FIRST_EVENT, data_root=data_root
+        )
+        if resolved is not None:
+            targets.append(elite_target(resolved, top))
+
+    return targets
+
+
+def _open_event(
+    season: Season,
+    bootstrap: dict,
+    cohort: str,
+    first_event: int,
+    *,
+    data_root: Path | None,
+) -> int | None:
+    captured = {
+        int(path.name.removeprefix("event="))
+        for path in _captured_event_dirs(season, cohort, data_root)
+    }
+    return resolve_capture_event(bootstrap, datetime.now(UTC), captured, first_event=first_event)
+
+
+def _captured_event_dirs(season: Season, cohort: str, data_root: Path | None):
+    """Gameweeks already holding at least one complete chunk for this cohort."""
+    parent = paths.raw_endpoint_dir(
+        "fpl", "entry_picks", season, cohort=cohort, data_root=data_root
+    )
+    if not parent.is_dir():
+        return []
+    return [
+        path
+        for path in parent.iterdir()
+        if path.is_dir()
+        and path.name.startswith("event=")
+        and any(chunk.is_dir() for chunk in path.iterdir())
+    ]
 
 
 @app.command()
