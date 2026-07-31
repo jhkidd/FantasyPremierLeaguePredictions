@@ -42,11 +42,9 @@ def test_version() -> None:
     "argv",
     [
         ["ingest", "understat"],
-        ["stage", "fpl"],
         ["facts"],
         ["crosswalk", "refresh"],
         ["crosswalk", "validate"],
-        ["check"],
         ["features", "--as-of", "2026-08-14T11:30:00Z"],
         ["backfill"],
     ],
@@ -57,6 +55,18 @@ def test_unbuilt_commands_exit_distinctly_and_name_their_phase(argv: list[str]) 
     result = runner.invoke(app, argv)
     assert result.exit_code == exit_codes.NOT_IMPLEMENTED
     assert "phase" in result.output
+
+
+def test_stage_fpl_with_no_raw_data_reports_nothing_captured(isolated_data_root: Path) -> None:
+    result = runner.invoke(app, ["--data-root", str(isolated_data_root), "stage", "fpl"])
+    assert result.exit_code == exit_codes.SUCCESS
+    assert "no bootstrap-static capture on disk" in result.output
+
+
+def test_check_with_no_staged_data_is_clean(isolated_data_root: Path) -> None:
+    result = runner.invoke(app, ["--data-root", str(isolated_data_root), "check"])
+    assert result.exit_code == exit_codes.SUCCESS
+    assert "clean" in result.output
 
 
 @pytest.mark.parametrize("season", ["2026-28", "not-a-season", "2026", "2026/27"])

@@ -43,8 +43,11 @@ from fpl.ownership import (
     resolve_capture_event,
     self_target,
 )
+from fpl.quality.checks import check_staged_tables
+from fpl.quality.gates import has_blocking_violations
 from fpl.sources.errors import BlockedError, SchemaError, SourceError
 from fpl.sources.fpl_api import FplApiConnector
+from fpl.staging.pipeline import stage_fpl_source
 from fpl.storage import paths
 
 app = typer.Typer(
@@ -446,12 +449,31 @@ def _captured_event_dirs(season: Season, cohort: str, data_root: Path | None):
 
 @app.command()
 def stage(
+    ctx: typer.Context,
     source: Annotated[str, typer.Argument(help="Source name.")],
     season: SeasonOption = str(CURRENT_SEASON),
+    table: Annotated[
+        str | None,
+        typer.Option("--table", help="Restrict to one staged table. Repeatable via commas."),
+    ] = None,
 ) -> None:
     """Transform data/raw/ into typed tables in data/staged/."""
-    _parse_season(season)
-    _pending(4, f"stage {source}")
+    parsed = _parse_season(season)
+    if source != "fpl":
+        _pending(4, f"stage {source}")
+
+    tables = {t.strip() for t in table.split(",")} if table else None
+    results = stage_fpl_source(parsed, data_root=_data_root(ctx), tables=tables)
+    for result in results:
+        status = "staged" if result.written else "skipped"
+        detail = f" ({result.detail})" if result.detail else ""
+        typer.echo(f"{result.table}: {status}, {result.rows} row(s){detail}")
+        if result.report and result.report.unknown_columns:
+            typer.secho(
+                f"  unknown column(s) seen and dropped: {list(result.report.unknown_columns)}",
+                err=True,
+                fg=typer.colors.YELLOW,
+            )
 
 
 @app.command()
@@ -478,9 +500,26 @@ def crosswalk_validate() -> None:
 
 
 @app.command()
-def check() -> None:
-    """Run every data quality gate."""
-    _pending(4, "check")
+def check(
+    ctx: typer.Context,
+    season: SeasonOption = str(CURRENT_SEASON),
+) -> None:
+    """Run every data quality gate against the staged layer for one season."""
+    parsed = _parse_season(season)
+    violations = check_staged_tables(parsed, data_root=_data_root(ctx))
+    if not violations:
+        typer.echo("check: clean")
+        raise typer.Exit(exit_codes.SUCCESS)
+
+    for violation in violations:
+        colour = typer.colors.RED if violation.severity == "block" else typer.colors.YELLOW
+        typer.secho(f"[{violation.severity}] {violation.gate}: {violation.detail}", fg=colour)
+        for row in violation.sample:
+            typer.echo(f"    {row}")
+
+    if has_blocking_violations(violations):
+        raise typer.Exit(exit_codes.QUALITY_GATE_FAILED)
+    raise typer.Exit(exit_codes.SUCCESS)
 
 
 @app.command()
