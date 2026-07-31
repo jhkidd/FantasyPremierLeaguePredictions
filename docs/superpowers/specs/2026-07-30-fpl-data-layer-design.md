@@ -169,8 +169,10 @@ data/
     fpl/event_live/season=2026-27/event=1/as_of=.../
     fpl/element_summary/season=2026-27/as_of=.../
     fpl/league_standings/season=2026-27/event=1/as_of=.../
-    fpl/entry_picks/season=2026-27/cohort=elite/event=2/chunk=0000/
+    fpl/entry/season=2026-27/as_of=.../
+    fpl/entry_picks/season=2026-27/cohort=self/event=1/chunk=0000/
     fpl/entry_picks/season=2026-27/cohort=mini/event=1/chunk=0000/
+    fpl/entry_picks/season=2026-27/cohort=elite/event=2/chunk=0000/
     vaastav/ understat/ clubelo/ footballdata/ cupfixtures/
 
   staged/
@@ -262,8 +264,6 @@ The design tracks two populations, because "who am I competing with" has two ans
 
 The overall case needs a statistical proxy because the field cannot be enumerated. The mini-league case needs no proxy at all — the league's standings endpoint returns every member, and each member's picks are one request. Mini-league capture is therefore both cheaper and *more* accurate than the elite sample, and it is the one that maps to the primary objective.
 
-The mini-league ID is configuration, not a constant. It can be discovered from `entry/{id}/` once registered, which lists every league the entry belongs to with its numeric ID.
-
 ### Why elite capture starts at gameweek 2
 
 **The overall league is empty until a gameweek has been scored.** Verified 2026-07-30: league 314 was recreated on 23 July and returns `standings.results: []` despite 2.28m registered entries. Ranks do not exist before a ball is kicked, so during gameweek 1 there is no top 1,000 to enumerate. Elite capture therefore begins at gameweek 2.
@@ -283,14 +283,21 @@ An alternative cohort was investigated and deferred rather than rejected: entry 
 
 This is deliberately *not* on the critical path: `entry/{id}/history/` is immutable, so the scan yields the same cohort whenever it is run. It can be built at leisure and applied retroactively to any gameweek still in the season.
 
-**Capture design.** Both cohorts use the same two steps: resolve a league's members, then fetch `entry/{id}/event/{gw}/picks/` for each. They differ only in scale and in when they start.
+**Capture design.** All three cohorts use the same mechanism: resolve a set of entries, then fetch `entry/{id}/event/{gw}/picks/` for each. They differ only in how the set is resolved, in scale, and in when they start.
 
-| Cohort | League | Entries | Requests per gameweek | From |
+| Cohort | Entries resolved from | Entries | Requests per gameweek | From |
 |---|---|---|---|---|
+| Self | our own configured team ID | 1 | 1, instant | GW1 |
+| Mini-league | discovered or configured league ID | All members | ~20, under a minute | GW1 |
 | Elite | `leagues-classic/314` (Overall) | Top 1,000 | ~1,020, ~35 min at 2s | GW2 |
-| Mini-league | configured league ID | All members | ~20, under a minute | GW1 |
 
-Each captured gameweek records which cohort it came from, so the two are never averaged together.
+Each captured gameweek records which cohort it came from, so the three are never averaged together.
+
+**Why our own squad is captured too.** It expires exactly as everyone else's does. Without it there is no record of what was actually played, so a recommendation can never be measured against the decision taken — which is the whole of evaluation (§2). One request a gameweek buys the entire ground truth for our own performance.
+
+**The mini-league ID is discovered, not configured.** League IDs are reissued every season and do not exist until someone creates the league, so a hand-set ID guarantees a window in which the job silently captures nothing — verified 2026-07-30, when the 2025/26 join code was already dead and the entry belonged to system leagues only. Capture therefore reads `entry/{id}/`, keeping leagues a person created (`league_type: "x"`) and discarding the Overall, country and sponsor leagues everyone is placed into (`"s"`). More than one candidate is reported rather than guessed at: capturing the wrong opponents is worse than capturing none and being told. An explicit ID always wins.
+
+Discovery is a lookup and stores nothing, and runs only when a capture would otherwise proceed — the job ticks 48 times a day, and an idle tick must write nothing at all. The valuable, time-varying parts of the entry document — bank, squad value, overall rank, all published only as a current value — are captured by the daily snapshot instead, at a cadence that suits them.
 
 **The capture window is the whole gameweek, not the 90 minutes before kickoff.** The rules state that automatic substitutions are *processed at the end of the gameweek*, so a team's recorded starting XI and captain reflect the manager's actual decision at any point from the deadline until the gameweek's last match finishes — a window of two to three days rather than ninety minutes. Two consequences follow, and both matter:
 
@@ -336,10 +343,10 @@ Two kinds of time exist in the facts layer, and `as_of` filters both.
 
 | Workflow | Schedule | Behaviour |
 |---|---|---|
-| `daily-snapshot` | 03:30 UTC daily | Runs after FPL's nightly price run. Pulls `bootstrap-static` and `fixtures` — two requests. Captures prices, ownership, injury news, status. |
+| `daily-snapshot` | 03:30 UTC daily | Runs after FPL's nightly price run. Pulls `bootstrap-static`, `fixtures` and our own `entry` — three requests. Captures prices, ownership, injury news, status, and our bank, squad value and overall rank. |
 | `post-gameweek` | 09:30 UTC daily | FPL finalises a gameweek at 09:00 UK the day after its last match. Checks whether a gameweek just locked; if so pulls `event/{gw}/live` (all players, one request), rebuilds facts, and reconciles derived points against FPL's. Once models exist it also appends predicted-vs-realised to `monitoring/`; until then that step is inert. Exits in seconds otherwise. |
 | `pre-deadline` | Hourly, Thu–Sun | Reads the real deadline from `events` and no-ops unless within the window. Refreshes availability. Once models exist it runs inference and publishes predictions; until then it publishes `status.json` only. Cron cannot express "90 minutes before a moving kickoff", so the job decides. |
-| `capture-ownership` | Every 30 min | Fires once per gameweek, after that gameweek's deadline and before its last match finishes (§6.1). Captures the configured mini-league every gameweek, and the top 1,000 overall entries from gameweek 2 — the overall league has no ranking before then. ~35 minutes at full scale, resumable. **The one job that cannot be missed within a season** — it runs frequently, resumes partial progress, and raises an issue immediately on failure rather than waiting for the next run. |
+| `capture-ownership` | Every 30 min | Fires once per gameweek, after that gameweek's deadline and before its last match finishes (§6.1). Captures our own squad and the mini-league every gameweek, and the top 1,000 overall entries from gameweek 2 — the overall league has no ranking before then. ~35 minutes at full scale, resumable. An idle tick writes nothing at all. **The one job that cannot be missed within a season** — it runs frequently, resumes partial progress, and raises an issue immediately on failure rather than waiting for the next run. |
 | `weekly-context` | Mondays | Understat (all six leagues), Club Elo, football-data.co.uk, cup and European fixture schedules. Slower-moving sources. |
 | `backfill` | Manual dispatch | Cold start and repair. Polite 3s spacing. A full `element-summary` sweep of ~700 players takes roughly 35 minutes, which is why routine jobs never perform one. |
 

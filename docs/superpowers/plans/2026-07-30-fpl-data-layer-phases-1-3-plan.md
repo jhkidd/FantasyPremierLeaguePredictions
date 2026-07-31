@@ -205,12 +205,13 @@ Run `bootstrap-static` and `fixtures` against the live API and commit the result
 
 > **Revised 30 July after probing the live API.** The original plan assumed a single cohort — the top 1,000 of the overall league — captured from GW1. That is not possible. `leagues-classic/314/standings/` returns an empty result set: the league was recreated on 2026-07-23 and holds no ranking until a gameweek has been scored, despite 2.28m managers having registered. **There is no top-1,000 to enumerate before GW1 is played.**
 >
-> The design now captures **two cohorts through one mechanism**, stored under separate `cohort=` partitions and never pooled — an ownership percentage computed across both populations would describe nobody.
+> The design now captures **three cohorts through one mechanism**, stored under separate `cohort=` partitions and never pooled — an ownership percentage computed across different populations would describe nobody.
 >
 > | Cohort | Population | First gameweek | Requests/GW |
 > |---|---|---|---|
+> | `self` | our own team — the record of what we actually played | GW1 | 1 |
+> | `mini` | Every member of the office league — the actual opponents, read *exactly* | GW1 | ~20 |
 > | `elite` | Top 1,000 of league 314 — a *sample* of a 2.3m field that cannot be enumerated | **GW2** | ~1,020 |
-> | `mini` | Every member of a configured league — the actual opponents, read *exactly* | GW1 | ~20 |
 >
 > **GW1 elite capture is skipped, not reconstructed.** It could be captured retroactively once GW1 is scored, but that cohort would be selected on one gameweek's outcome — mostly noise — and would not mean the same thing as every other week. A silently different definition in one row of a time series is worse than an honest gap. The cost is small: initial-squad selection is a constrained maximisation in which ownership plays no part, pre-season global ownership is an unusually good captaincy proxy, and rolling transfers make an imperfect start cheap to correct.
 
@@ -260,13 +261,17 @@ Contamination is *partial*, which is why a late capture is still worth taking: `
 ### 3.5 `fpl capture-ownership` — ✅ done
 
 ```
-fpl capture-ownership [--cohort elite|mini|all] [--event N] [--top 1000]
-                      [--league ID] [--limit N] [--dry-run]
+fpl capture-ownership [--cohort self|mini|elite|all] [--event N] [--top 1000]
+                      [--league ID] [--entry ID] [--limit N] [--dry-run]
 ```
 
-Resolves each cohort's gameweek independently, collects entry IDs, and fills only the missing chunks. Exits 0 with `nothing_to_do` when no gameweek is open — the normal state.
+Resolves each cohort's gameweek independently, collects entry IDs, and fills only the missing chunks. Exits 0 with `nothing_to_do` when no gameweek is open — the normal state — having written nothing.
 
-The mini-league ID comes from `--league` or `$FPL_MINI_LEAGUE_ID`. A **malformed** value is ignored rather than fatal, so a typo in workflow config cannot take down the daily snapshot, which does not use it. An **absent** value warns and skips the cohort under `--cohort all`, but is a usage error under `--cohort mini`, where the user asked for it explicitly.
+A cohort is defined either by a league or by entries named outright, so `self` reuses the whole chunking, resume and contamination mechanism without a league table to page.
+
+The team comes from `--entry` or `$FPL_ENTRY_ID`; the mini-league from `--league`, `$FPL_MINI_LEAGUE_ID`, or **discovery from the team**, in that order. A **malformed** value is ignored rather than fatal, so a typo in workflow config cannot take down the daily snapshot. An **absent** value warns and skips the cohort under `--cohort all`, but is a usage error when that cohort was asked for explicitly.
+
+`fpl discover-league` exposes the same lookup directly, for when you want to see the IDs rather than act on them.
 
 ### 3.6 Workflows — ✅ done, no-op path verified live
 
@@ -294,7 +299,7 @@ The no-op path, dispatch inputs, permissions, commit and push are all verified. 
 |---|---|---|
 | ~~Early Aug~~ | ~~Re-probe `entry/{id}/event/{gw}/picks/`~~ — impossible before GW1; 404 confirms the endpoint has no data to serve | Moved to 21 Aug. |
 | By 16 Aug | ~~Phases 1–3 merged to `master`, workflows scheduled~~ ✅ done 30 July | Leaves a rehearsal buffer. |
-| Before GW1 | Set `vars.FPL_MINI_LEAGUE_ID` once the office league exists | The mini cohort is the one that starts at GW1, and it is the league that actually matters. |
+| Before GW1 | Nothing — the league is discovered from `vars.FPL_ENTRY_ID` (set to 2282251) the moment it exists | Removes the manual step that would otherwise have to be noticed and performed in time. |
 | **21 Aug, deadline + 15 min** | `workflow_dispatch` with `limit: 20`; **verify `entry_picks` returns 200** | First contact with real data, and the last unverified assumption in the design. |
 | **21 Aug, deadline + 45 min** | Confirm the scheduled run committed the mini cohort | **GW1 picks are unrecoverable after the season ends.** |
 | **GW2** | Confirm the elite cohort activates now that league 314 has a ranking | The elite cohort has never run; GW2 is its first execution. |
