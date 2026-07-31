@@ -42,7 +42,6 @@ def test_version() -> None:
     "argv",
     [
         ["ingest", "understat"],
-        ["facts"],
         ["crosswalk", "refresh"],
         ["crosswalk", "validate"],
         ["features", "--as-of", "2026-08-14T11:30:00Z"],
@@ -74,10 +73,39 @@ def test_stage_vaastav_with_no_raw_data_reports_nothing_captured(
     assert "no vaastav merged_gw capture on disk" in result.output
 
 
+def test_facts_with_no_staged_data_reports_nothing_to_assemble(
+    isolated_data_root: Path,
+) -> None:
+    result = runner.invoke(
+        app,
+        ["--data-root", str(isolated_data_root), "facts", "--season", "2025-26"],
+    )
+    assert result.exit_code == exit_codes.SUCCESS
+    assert "skipped" in result.output
+
+
 def test_check_with_no_staged_data_is_clean(isolated_data_root: Path) -> None:
     result = runner.invoke(app, ["--data-root", str(isolated_data_root), "check"])
     assert result.exit_code == exit_codes.SUCCESS
     assert "clean" in result.output
+
+
+@pytest.mark.parametrize("layer", ["staged", "facts", "both"])
+def test_check_layer_option_is_clean_with_no_data(
+    isolated_data_root: Path, layer: str
+) -> None:
+    result = runner.invoke(
+        app, ["--data-root", str(isolated_data_root), "check", "--layer", layer]
+    )
+    assert result.exit_code == exit_codes.SUCCESS
+    assert "clean" in result.output
+
+
+def test_check_rejects_unknown_layer(isolated_data_root: Path) -> None:
+    result = runner.invoke(
+        app, ["--data-root", str(isolated_data_root), "check", "--layer", "bronze"]
+    )
+    assert result.exit_code == exit_codes.USAGE
 
 
 @pytest.mark.parametrize("season", ["2026-28", "not-a-season", "2026", "2026/27"])

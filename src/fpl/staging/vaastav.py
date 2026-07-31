@@ -131,6 +131,16 @@ class StagedMergedGw:
     frame: pl.DataFrame
     report: StagingReport
     excluded_manager_rows: int
+    duplicate_rows_dropped: int = 0
+    """Exact byte-for-byte duplicate CSV rows dropped before staging.
+
+    Verified live against the real 2025/26 archive: certain players (e.g.
+    element 100, "Junior Kroupi") appear with every single field identical
+    across two consecutive rows for the same fixture, throughout the whole
+    file. This is a genuine upstream archive defect, not a staging bug — the
+    duplicate is dropped here (a safe operation, since the two rows carry
+    identical data) rather than surfacing as a key-uniqueness violation
+    downstream, where it would look like our own bug."""
 
 
 def era_for_season(season: Season) -> str:
@@ -165,8 +175,17 @@ def stage_merged_gw(body: bytes, season: Season) -> StagedMergedGw:
     excluded = raw.filter(is_manager_row).height
     raw = raw.filter(~is_manager_row)
 
+    rows_before_dedupe = raw.height
+    raw = raw.unique(maintain_order=True)
+    duplicate_rows_dropped = rows_before_dedupe - raw.height
+
     staged, report = stage_frame(raw, spec)
     staged = staged.with_columns(pl.lit(str(season)).alias("season")).select(
         ["season", *staged.columns]
     )
-    return StagedMergedGw(frame=staged, report=report, excluded_manager_rows=excluded)
+    return StagedMergedGw(
+        frame=staged,
+        report=report,
+        excluded_manager_rows=excluded,
+        duplicate_rows_dropped=duplicate_rows_dropped,
+    )

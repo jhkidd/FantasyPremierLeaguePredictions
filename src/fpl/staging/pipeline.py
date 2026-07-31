@@ -258,9 +258,10 @@ def stage_vaastav_source(
         ("player_id", "fixture_id"),
         data_root=data_root,
     )
-    detail = (
-        f"excluded {staged.excluded_manager_rows} manager-asset row(s)"
-        if staged.excluded_manager_rows
-        else ""
-    )
+    detail_parts = []
+    if staged.excluded_manager_rows:
+        detail_parts.append(f"excluded {staged.excluded_manager_rows} manager-asset row(s)")
+    if staged.duplicate_rows_dropped:
+        detail_parts.append(f"dropped {staged.duplicate_rows_dropped} exact-duplicate row(s)")
+    detail = "; ".join(detail_parts)
     return [StageResult("player_fixture_stats", True, staged.frame.height, staged.report, detail)]

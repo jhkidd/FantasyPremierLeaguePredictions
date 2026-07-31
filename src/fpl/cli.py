@@ -27,6 +27,8 @@ from fpl.config import (
     Config,
     Season,
 )
+from fpl.facts.player_fixture import write_player_fixture_facts
+from fpl.facts.points import write_points
 from fpl.ingest import ingest_fpl
 from fpl.ownership import (
     COHORTS,
@@ -43,10 +45,11 @@ from fpl.ownership import (
     resolve_capture_event,
     self_target,
 )
-from fpl.quality.checks import check_staged_tables
+from fpl.quality.checks import check_facts_tables, check_staged_tables
 from fpl.quality.gates import has_blocking_violations
 from fpl.sources.errors import BlockedError, SchemaError, SourceError
 from fpl.sources.fpl_api import FplApiConnector
+from fpl.sources.vaastav import VaastavConnector
 from fpl.staging.pipeline import stage_fpl_source, stage_vaastav_source
 from fpl.storage import paths
 
@@ -152,6 +155,18 @@ def ingest(
 ) -> None:
     """Pull from a source into data/raw/."""
     parsed = _parse_season(season)
+
+    if source == "vaastav":
+        with _source_failures(), VaastavConnector() as connector:
+            results = connector.fetch_and_store_season(
+                parsed, force=force, data_root=_data_root(ctx)
+            )
+        written = sum(1 for result in results if result.written)
+        typer.echo(
+            f"{len(results)} file(s) pulled, {written} written, "
+            f"{len(results) - written} unchanged"
+        )
+        return
 
     if source != "fpl":
         _pending(7, f"ingest {source}")
@@ -484,12 +499,33 @@ def stage(
 
 @app.command()
 def facts(
+    ctx: typer.Context,
     season: SeasonOption = str(CURRENT_SEASON),
-    rules: Annotated[str | None, typer.Option("--rules", help="Scoring ruleset.")] = None,
+    rules: Annotated[
+        str | None,
+        typer.Option("--rules", help="Scoring ruleset: legacy, 2025-26, or 2026-27."),
+    ] = None,
 ) -> None:
     """Assemble canonical player-fixture facts from data/staged/."""
-    _parse_season(season)
-    _pending(5, "facts")
+    parsed = _parse_season(season)
+    data_root = _data_root(ctx)
+
+    facts_result = write_player_fixture_facts(parsed, data_root=data_root)
+    if not facts_result.written:
+        typer.echo(f"player_fixture: skipped, {facts_result.detail}")
+        return
+    typer.echo(f"player_fixture: written, {facts_result.frame.height} row(s)")
+
+    if rules is None:
+        return
+    try:
+        points_result = write_points(parsed, rules, data_root=data_root)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if not points_result.written:
+        typer.echo(f"points[{rules}]: skipped, {points_result.detail}")
+        return
+    typer.echo(f"points[{rules}]: written, {points_result.frame.height} row(s)")
 
 
 @crosswalk_app.command("refresh")
@@ -509,10 +545,20 @@ def crosswalk_validate() -> None:
 def check(
     ctx: typer.Context,
     season: SeasonOption = str(CURRENT_SEASON),
+    layer: Annotated[
+        str, typer.Option("--layer", help="Which layer to gate: staged, facts, or both.")
+    ] = "both",
 ) -> None:
-    """Run every data quality gate against the staged layer for one season."""
+    """Run every data quality gate against staged and/or facts tables for one season."""
+    if layer not in ("staged", "facts", "both"):
+        raise typer.BadParameter("--layer must be one of: staged, facts, both")
     parsed = _parse_season(season)
-    violations = check_staged_tables(parsed, data_root=_data_root(ctx))
+    data_root = _data_root(ctx)
+    violations = []
+    if layer in ("staged", "both"):
+        violations.extend(check_staged_tables(parsed, data_root=data_root))
+    if layer in ("facts", "both"):
+        violations.extend(check_facts_tables(parsed, data_root=data_root))
     if not violations:
         typer.echo("check: clean")
         raise typer.Exit(exit_codes.SUCCESS)

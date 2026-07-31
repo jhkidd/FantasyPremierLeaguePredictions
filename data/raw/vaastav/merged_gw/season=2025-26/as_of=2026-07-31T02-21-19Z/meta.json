@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 1258342,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "merged_gw",
+  "event": null,
+  "fetched_at": "2026-07-31T02:21:19.424364+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 5445456,
+  "season": "2025-26",
+  "sha256": "0d09f1f1cb1b5520ec8e2f25238aa652efe2a263d8ca7cb2b6538b27bf86727d",
+  "source": "vaastav",
+  "url": "https://github.com/vaastav/Fantasy-Premier-League/archive/refs/heads/master.tar.gz#data/2025-26/gws/merged_gw.csv"
+}
