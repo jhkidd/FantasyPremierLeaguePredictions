@@ -63,6 +63,17 @@ def test_stage_fpl_with_no_raw_data_reports_nothing_captured(isolated_data_root:
     assert "no bootstrap-static capture on disk" in result.output
 
 
+def test_stage_vaastav_with_no_raw_data_reports_nothing_captured(
+    isolated_data_root: Path,
+) -> None:
+    result = runner.invoke(
+        app,
+        ["--data-root", str(isolated_data_root), "stage", "vaastav", "--season", "2025-26"],
+    )
+    assert result.exit_code == exit_codes.SUCCESS
+    assert "no vaastav merged_gw capture on disk" in result.output
+
+
 def test_check_with_no_staged_data_is_clean(isolated_data_root: Path) -> None:
     result = runner.invoke(app, ["--data-root", str(isolated_data_root), "check"])
     assert result.exit_code == exit_codes.SUCCESS

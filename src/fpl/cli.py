@@ -47,7 +47,7 @@ from fpl.quality.checks import check_staged_tables
 from fpl.quality.gates import has_blocking_violations
 from fpl.sources.errors import BlockedError, SchemaError, SourceError
 from fpl.sources.fpl_api import FplApiConnector
-from fpl.staging.pipeline import stage_fpl_source
+from fpl.staging.pipeline import stage_fpl_source, stage_vaastav_source
 from fpl.storage import paths
 
 app = typer.Typer(
@@ -459,11 +459,17 @@ def stage(
 ) -> None:
     """Transform data/raw/ into typed tables in data/staged/."""
     parsed = _parse_season(season)
-    if source != "fpl":
+    if source not in {"fpl", "vaastav"}:
         _pending(4, f"stage {source}")
 
     tables = {t.strip() for t in table.split(",")} if table else None
-    results = stage_fpl_source(parsed, data_root=_data_root(ctx), tables=tables)
+    if source == "fpl":
+        results = stage_fpl_source(parsed, data_root=_data_root(ctx), tables=tables)
+    else:
+        try:
+            results = stage_vaastav_source(parsed, data_root=_data_root(ctx))
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
     for result in results:
         status = "staged" if result.written else "skipped"
         detail = f" ({result.detail})" if result.detail else ""

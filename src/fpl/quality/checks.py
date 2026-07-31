@@ -42,6 +42,11 @@ STAGED_TABLE_GATES: dict[str, list[Gate]] = {
     "price_snapshots": [unique_key(["player_id", "as_of_ts"])],
     "availability_snapshots": [unique_key(["player_id", "as_of_ts"])],
     "entry_snapshots": [unique_key(["entry_id", "as_of_ts"])],
+    "player_fixture_stats": [
+        unique_key(["player_id", "fixture_id"]),
+        in_range("minutes", minimum=0, maximum=120),
+        non_negative("goals_scored"),
+    ],
 }
 
 

@@ -24,11 +24,12 @@ from fpl.staging.fpl_api import (
     stage_manager_picks,
     stage_price_snapshots,
 )
+from fpl.staging.vaastav import stage_merged_gw
 from fpl.storage import paths
 from fpl.storage.parquet_io import write_parquet
 from fpl.storage.raw_io import partition_as_of, read_raw
 
-__all__ = ["StageResult", "stage_fpl_source"]
+__all__ = ["StageResult", "stage_fpl_source", "stage_vaastav_source"]
 
 _COHORTS = ("self", "mini", "elite")
 
@@ -227,3 +228,39 @@ def stage_fpl_source(
     results += _stage_entry_snapshots(season, data_root, tables)
     results += _stage_manager_picks(season, data_root, tables)
     return results
+
+
+def stage_vaastav_source(
+    season: Season,
+    *,
+    data_root: Path | None = None,
+) -> list[StageResult]:
+    """Stage vaastav's ``merged_gw.csv`` for one season into ``player_fixture_stats``.
+
+    Only the seasons classified in :data:`fpl.staging.vaastav.ERA_BY_SEASON`
+    can be staged — phase 4 classifies 2025/26 alone (the resequencing
+    decision), so an earlier season raises rather than silently doing
+    nothing.
+    """
+    partition = paths.latest_partition("vaastav", "merged_gw", season, data_root=data_root)
+    if partition is None:
+        return [
+            StageResult(
+                "player_fixture_stats", False, 0, None, "no vaastav merged_gw capture on disk"
+            )
+        ]
+    body, _meta = read_raw(partition)
+    staged = stage_merged_gw(body, season)
+    _write(
+        staged.frame,
+        "player_fixture_stats",
+        season,
+        ("player_id", "fixture_id"),
+        data_root=data_root,
+    )
+    detail = (
+        f"excluded {staged.excluded_manager_rows} manager-asset row(s)"
+        if staged.excluded_manager_rows
+        else ""
+    )
+    return [StageResult("player_fixture_stats", True, staged.frame.height, staged.report, detail)]
