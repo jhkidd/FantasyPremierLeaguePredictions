@@ -160,6 +160,30 @@ class TestIterChunks:
         assert list(paths.iter_chunks("fpl", "entry_picks", SEASON, event=1)) == []
 
 
+class TestIterAsOfPartitions:
+    def test_empty_when_nothing_captured(self) -> None:
+        assert list(paths.iter_as_of_partitions("fpl", "bootstrap_static", SEASON)) == []
+
+    def test_yields_partitions_oldest_first(self) -> None:
+        for offset in (5, 0, 2):
+            paths.raw_partition(
+                "fpl", "bootstrap_static", SEASON, MOMENT + timedelta(days=offset)
+            ).mkdir(parents=True)
+        names = [p.name for p in paths.iter_as_of_partitions("fpl", "bootstrap_static", SEASON)]
+        assert names == [
+            f"as_of={paths.encode_as_of(MOMENT + timedelta(days=offset))}" for offset in (0, 2, 5)
+        ]
+
+    def test_ignores_chunk_partitions(self) -> None:
+        paths.chunk_partition("fpl", "entry_picks", SEASON, 0, event=1).mkdir(parents=True)
+        assert list(paths.iter_as_of_partitions("fpl", "entry_picks", SEASON, event=1)) == []
+
+    def test_is_scoped_to_its_event(self) -> None:
+        paths.raw_partition("fpl", "event_live", SEASON, MOMENT, event=1).mkdir(parents=True)
+        assert list(paths.iter_as_of_partitions("fpl", "event_live", SEASON, event=2)) == []
+        assert len(list(paths.iter_as_of_partitions("fpl", "event_live", SEASON, event=1))) == 1
+
+
 class TestStagedAndFactsPaths:
     def test_staged_layout(self, isolated_data_root: Path) -> None:
         assert paths.staged_table("players", SEASON) == (

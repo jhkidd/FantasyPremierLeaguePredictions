@@ -20,6 +20,7 @@ __all__ = [
     "decode_as_of",
     "encode_as_of",
     "facts_table",
+    "iter_as_of_partitions",
     "iter_chunks",
     "latest_partition",
     "raw_endpoint_dir",
@@ -186,6 +187,30 @@ def iter_chunks(
 
 def staged_table(name: str, season: Season, *, data_root: Path | None = None) -> Path:
     return _root(data_root) / "staged" / _check_component(name, label="table") / f"season={season}"
+
+
+def iter_as_of_partitions(
+    source: str,
+    endpoint: str,
+    season: Season,
+    *,
+    cohort: str | None = None,
+    event: int | None = None,
+    data_root: Path | None = None,
+) -> Iterator[Path]:
+    """Yield every ``as_of=...`` capture of an endpoint, oldest first.
+
+    Staging needs every historical snapshot to build a table like
+    ``price_snapshots`` — the volatile fields that are only ever published as
+    a current value, so each capture is a distinct row rather than an update.
+    """
+    parent = raw_endpoint_dir(
+        source, endpoint, season, cohort=cohort, event=event, data_root=data_root
+    )
+    if not parent.is_dir():
+        return
+    partitions = [p for p in parent.iterdir() if p.is_dir() and p.name.startswith("as_of=")]
+    yield from sorted(partitions, key=lambda p: p.name)
 
 
 def facts_table(
