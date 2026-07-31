@@ -20,12 +20,18 @@ __all__ = ["ROUTINE_ENDPOINTS", "SUPPORTED_ENDPOINTS", "ingest_fpl"]
 
 logger = get_logger(__name__)
 
-ROUTINE_ENDPOINTS: tuple[str, ...] = ("bootstrap-static", "fixtures")
-"""What `daily-snapshot` pulls: two requests, run after FPL's nightly price update."""
+ROUTINE_ENDPOINTS: tuple[str, ...] = ("bootstrap-static", "fixtures", "entry")
+"""What `daily-snapshot` pulls, run after FPL's nightly price update.
+
+`entry` is our own team. It carries bank, squad value and overall rank, which
+FPL publishes only as a current value — so a day not captured is a day gone,
+exactly as for prices. It is dropped from the selection when no team is
+configured rather than failing the snapshot."""
 
 SUPPORTED_ENDPOINTS: tuple[str, ...] = (
     "bootstrap-static",
     "fixtures",
+    "entry",
     "event-live",
     "element-summary",
 )
@@ -37,6 +43,7 @@ def ingest_fpl(
     *,
     event: int | None = None,
     player_id: int | None = None,
+    entry_id: int | None = None,
     data_root: Path | None = None,
     connector: FplApiConnector | None = None,
     force: bool = False,
@@ -46,7 +53,7 @@ def ingest_fpl(
     Idempotent: re-running with unchanged upstream data writes nothing, because
     storage is content-addressed.
     """
-    selected = tuple(endpoints) if endpoints else ROUTINE_ENDPOINTS
+    selected = tuple(endpoints) if endpoints else _routine_endpoints(entry_id)
     unknown = [name for name in selected if name not in SUPPORTED_ENDPOINTS]
     if unknown:
         raise ValueError(f"unknown endpoint(s) {unknown}; supported: {list(SUPPORTED_ENDPOINTS)}")
@@ -57,7 +64,7 @@ def ingest_fpl(
 
     try:
         for name in selected:
-            artifact = _fetch(connector, name, event=event, player_id=player_id)
+            artifact = _fetch(connector, name, event=event, player_id=player_id, entry_id=entry_id)
             result = write_raw(artifact, force=force, data_root=data_root)
             results.append(result)
             log_event(
@@ -80,11 +87,33 @@ def ingest_fpl(
     return results
 
 
-def _fetch(connector: FplApiConnector, endpoint: str, *, event: int | None, player_id: int | None):
+def _routine_endpoints(entry_id: int | None) -> tuple[str, ...]:
+    """The daily set, minus anything it has no argument for.
+
+    A missing team must not fail the snapshot: prices and fixtures are the
+    reason the job exists, and they do not depend on it.
+    """
+    if entry_id is not None:
+        return ROUTINE_ENDPOINTS
+    return tuple(name for name in ROUTINE_ENDPOINTS if name != "entry")
+
+
+def _fetch(
+    connector: FplApiConnector,
+    endpoint: str,
+    *,
+    event: int | None,
+    player_id: int | None,
+    entry_id: int | None = None,
+):
     if endpoint == "bootstrap-static":
         return connector.bootstrap_static()
     if endpoint == "fixtures":
         return connector.fixtures(event=event)
+    if endpoint == "entry":
+        if entry_id is None:
+            raise ValueError("entry requires --entry or $FPL_ENTRY_ID")
+        return connector.entry(entry_id)
     if endpoint == "event-live":
         if event is None:
             raise ValueError("event-live requires --event")

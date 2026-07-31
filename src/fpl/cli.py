@@ -139,6 +139,10 @@ def ingest(
     ] = None,
     event: Annotated[int | None, typer.Option("--event", help="Gameweek number.")] = None,
     player: Annotated[int | None, typer.Option("--player", help="FPL element id.")] = None,
+    entry: Annotated[
+        int | None,
+        typer.Option("--entry", help=f"Your own team ID. Defaults to ${ENTRY_ENV_VAR}."),
+    ] = None,
     force: Annotated[
         bool, typer.Option("--force", help="Write even if the content is unchanged.")
     ] = False,
@@ -149,12 +153,21 @@ def ingest(
     if source != "fpl":
         _pending(7, f"ingest {source}")
 
+    entry_id = entry if entry is not None else Config.load().entry_id
+    if endpoint is None and entry_id is None:
+        typer.secho(
+            f"No team configured (${ENTRY_ENV_VAR} unset); skipping the entry endpoint.",
+            err=True,
+            fg=typer.colors.YELLOW,
+        )
+
     try:
         results = ingest_fpl(
             parsed,
             [endpoint] if endpoint else None,
             event=event,
             player_id=player,
+            entry_id=entry_id,
             data_root=_data_root(ctx),
             force=force,
         )
@@ -237,7 +250,12 @@ def capture_ownership_command(
         raise typer.Exit(exit_codes.FAILURE)
 
     if league_id is None and entry_id is not None and cohort in {MINI_COHORT, "all"}:
-        league_id = _discover_league(parsed, entry_id, data_root=data_root)
+        # Only when a mini capture would otherwise go ahead. The job ticks 48
+        # times a day and this is a network call; running it against a closed
+        # gameweek would be 48 pointless requests for an answer nothing uses.
+        pending = event or _open_event(parsed, bootstrap, MINI_COHORT, 1, data_root=data_root)
+        if pending is not None:
+            league_id = _discover_league(parsed, entry_id)
 
     targets = _capture_targets(
         parsed,
@@ -330,7 +348,7 @@ def _capture_targets(
     return targets
 
 
-def _discover_league(season: Season, entry_id: int, *, data_root: Path | None) -> int | None:
+def _discover_league(season: Season, entry_id: int) -> int | None:
     """Find the mini-league from our own team rather than being told it.
 
     League IDs change every season and are not known until someone creates the
@@ -344,12 +362,17 @@ def _discover_league(season: Season, entry_id: int, *, data_root: Path | None) -
     """
     try:
         with FplApiConnector(season) as connector:
-            leagues = discover_private_leagues(connector, entry_id, data_root=data_root)
+            leagues = discover_private_leagues(connector, entry_id)
     except SourceError as exc:
         typer.secho(f"Could not read leagues for entry {entry_id}: {exc}", err=True, fg="yellow")
         return None
 
     if not leagues:
+        typer.secho(
+            f"Entry {entry_id} is in no private league yet; skipping the mini cohort.",
+            err=True,
+            fg=typer.colors.YELLOW,
+        )
         return None
     if len(leagues) > 1:
         listed = ", ".join(f"{league.name} ({league.id})" for league in leagues)
@@ -368,7 +391,6 @@ def _discover_league(season: Season, entry_id: int, *, data_root: Path | None) -
 
 @app.command("discover-league")
 def discover_league_command(
-    ctx: typer.Context,
     season: SeasonOption = str(CURRENT_SEASON),
     entry: Annotated[
         int | None,
@@ -382,7 +404,7 @@ def discover_league_command(
         raise typer.BadParameter(f"no team configured; pass --entry or set ${ENTRY_ENV_VAR}")
 
     with _source_failures(), FplApiConnector(parsed) as connector:
-        leagues = discover_private_leagues(connector, entry_id, data_root=_data_root(ctx))
+        leagues = discover_private_leagues(connector, entry_id)
 
     if not leagues:
         typer.echo(f"Entry {entry_id} is in no private leagues yet.")

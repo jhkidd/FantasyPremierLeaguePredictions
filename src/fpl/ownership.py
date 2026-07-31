@@ -413,9 +413,7 @@ class League:
     name: str
 
 
-def discover_private_leagues(
-    connector: FplApiConnector, entry_id: int, *, data_root: Path | None = None
-) -> list[League]:
+def discover_private_leagues(connector: FplApiConnector, entry_id: int) -> list[League]:
     """The leagues this manager joined deliberately, newest first.
 
     FPL puts everyone into Overall, Gameweek 1, a country league and whatever
@@ -424,10 +422,13 @@ def discover_private_leagues(
 
     Returns them so the caller can decide. Picking one is a judgement — this
     function does not make it.
+
+    Nothing is stored: this is a lookup, not an ingestion. The valuable and
+    time-varying parts of the entry document — bank, squad value, overall rank
+    — are captured by the daily snapshot, which runs at a cadence that suits
+    them.
     """
-    artifact = connector.entry(entry_id)
-    write_raw(artifact, data_root=data_root)
-    payload = json.loads(artifact.body)
+    payload = json.loads(connector.entry(entry_id).body)
 
     leagues = payload.get("leagues")
     classic = leagues.get("classic") if isinstance(leagues, dict) else None

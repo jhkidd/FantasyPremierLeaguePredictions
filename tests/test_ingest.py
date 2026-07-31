@@ -46,8 +46,38 @@ class TestRoutineIngestion:
     def test_default_pulls_the_routine_set(self, connector: FplApiConnector) -> None:
         mock_routine()
         results = ingest_fpl(SEASON, connector=connector)
-        assert len(results) == len(ROUTINE_ENDPOINTS)
+        assert len(results) == len(ROUTINE_ENDPOINTS) - 1
         assert all(result.written for result in results)
+
+    @respx.mock
+    def test_no_team_configured_still_pulls_prices_and_fixtures(
+        self, connector: FplApiConnector
+    ) -> None:
+        """Prices and fixtures are why the daily job exists and do not depend
+        on a team, so a missing entry ID must not fail the snapshot."""
+        mock_routine()
+        results = ingest_fpl(SEASON, connector=connector, entry_id=None)
+        assert [result.path.parts[-3] for result in results] == [
+            "bootstrap_static",
+            "fixtures",
+        ]
+
+    @respx.mock
+    def test_a_configured_team_is_snapshotted_daily(self, connector: FplApiConnector) -> None:
+        """Bank, squad value and overall rank are published only as a current
+        value, so a day not captured is a day gone."""
+        mock_routine()
+        respx.get(f"{BASE}/entry/2282251/").mock(
+            return_value=httpx.Response(200, json={"id": 2282251, "last_deadline_bank": 5})
+        )
+        results = ingest_fpl(SEASON, connector=connector, entry_id=2282251)
+        assert len(results) == len(ROUTINE_ENDPOINTS)
+        assert any(result.path.parts[-3] == "entry" for result in results)
+
+    @respx.mock
+    def test_asking_for_entry_without_a_team_is_an_error(self, connector: FplApiConnector) -> None:
+        with pytest.raises(ValueError, match="entry requires"):
+            ingest_fpl(SEASON, ["entry"], connector=connector)
 
     @respx.mock
     def test_writes_readable_artifacts(self, connector: FplApiConnector) -> None:

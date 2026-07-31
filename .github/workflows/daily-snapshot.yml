@@ -35,6 +35,8 @@ jobs:
       - uses: ./.github/actions/setup
 
       - name: Ingest
+        env:
+          FPL_ENTRY_ID: ${{ vars.FPL_ENTRY_ID }}
         run: uv run fpl --verbose ingest fpl ${{ inputs.force && '--force' || '' }}
 
       - name: Commit

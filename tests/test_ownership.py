@@ -396,9 +396,7 @@ class TestDiscoverPrivateLeagues:
         )
 
     @respx.mock
-    def test_ignores_the_leagues_everyone_is_put_into(
-        self, connector: FplApiConnector, tmp_path: Path
-    ) -> None:
+    def test_ignores_the_leagues_everyone_is_put_into(self, connector: FplApiConnector) -> None:
         """Overall, Gameweek 1, country and sponsor leagues are marked 's' and
         are opponents in no meaningful sense."""
         self._mock_entry(
@@ -410,21 +408,19 @@ class TestDiscoverPrivateLeagues:
                 {"id": 555001, "name": "The Office", "league_type": "x"},
             ],
         )
-        found = discover_private_leagues(connector, 2282251, data_root=tmp_path)
+        found = discover_private_leagues(connector, 2282251)
         assert found == [League(555001, "The Office")]
 
     @respx.mock
-    def test_no_private_leagues_yet_is_not_an_error(
-        self, connector: FplApiConnector, tmp_path: Path
-    ) -> None:
+    def test_no_private_leagues_yet_is_not_an_error(self, connector: FplApiConnector) -> None:
         """The state of a freshly registered team, and of any team before the
         league admin has recreated the league for the new season."""
         self._mock_entry(2282251, [{"id": 314, "name": "Overall", "league_type": "s"}])
-        assert discover_private_leagues(connector, 2282251, data_root=tmp_path) == []
+        assert discover_private_leagues(connector, 2282251) == []
 
     @respx.mock
     def test_reports_every_private_league_rather_than_choosing(
-        self, connector: FplApiConnector, tmp_path: Path
+        self, connector: FplApiConnector
     ) -> None:
         self._mock_entry(
             2282251,
@@ -433,13 +429,11 @@ class TestDiscoverPrivateLeagues:
                 {"id": 222, "name": "Family", "league_type": "x"},
             ],
         )
-        found = discover_private_leagues(connector, 2282251, data_root=tmp_path)
+        found = discover_private_leagues(connector, 2282251)
         assert [league.id for league in found] == [111, 222]
 
     @respx.mock
-    def test_malformed_league_rows_are_skipped_not_fatal(
-        self, connector: FplApiConnector, tmp_path: Path
-    ) -> None:
+    def test_malformed_league_rows_are_skipped_not_fatal(self, connector: FplApiConnector) -> None:
         self._mock_entry(
             2282251,
             [
@@ -449,5 +443,5 @@ class TestDiscoverPrivateLeagues:
                 {"id": 444, "name": "Good", "league_type": "x"},
             ],
         )
-        found = discover_private_leagues(connector, 2282251, data_root=tmp_path)
+        found = discover_private_leagues(connector, 2282251)
         assert found == [League(444, "Good")]
