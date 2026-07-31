@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 67310,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "fixtures",
+  "event": null,
+  "fetched_at": "2026-07-31T02:45:04.963762+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 751413,
+  "season": "2024-25",
+  "sha256": "ce696e187569ca7c45da2562811d3c38f525b58e65575531be37bebd0769ee28",
+  "source": "vaastav",
+  "url": "https://github.com/vaastav/Fantasy-Premier-League/archive/refs/heads/master.tar.gz#data/2024-25/fixtures.csv"
+}

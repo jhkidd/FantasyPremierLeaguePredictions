@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 109390,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "players_raw",
+  "event": null,
+  "fetched_at": "2026-07-31T02:45:01.012219+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 310197,
+  "season": "2023-24",
+  "sha256": "43d8cf5efb3d901f2499558c40b392b7f0ee22afe28030f36266ad29024c63d9",
+  "source": "vaastav",
+  "url": "https://github.com/vaastav/Fantasy-Premier-League/archive/refs/heads/master.tar.gz#data/2023-24/players_raw.csv"
+}

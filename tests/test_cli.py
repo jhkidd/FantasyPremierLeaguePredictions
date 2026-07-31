@@ -42,10 +42,7 @@ def test_version() -> None:
     "argv",
     [
         ["ingest", "understat"],
-        ["crosswalk", "refresh"],
-        ["crosswalk", "validate"],
         ["features", "--as-of", "2026-08-14T11:30:00Z"],
-        ["backfill"],
     ],
 )
 def test_unbuilt_commands_exit_distinctly_and_name_their_phase(argv: list[str]) -> None:
@@ -88,6 +85,42 @@ def test_check_with_no_staged_data_is_clean(isolated_data_root: Path) -> None:
     result = runner.invoke(app, ["--data-root", str(isolated_data_root), "check"])
     assert result.exit_code == exit_codes.SUCCESS
     assert "clean" in result.output
+
+
+def test_crosswalk_refresh_with_no_ingested_data_writes_empty_crosswalks(
+    isolated_data_root: Path,
+) -> None:
+    result = runner.invoke(app, ["--data-root", str(isolated_data_root), "crosswalk", "refresh"])
+    assert result.exit_code == exit_codes.SUCCESS
+    assert (isolated_data_root / "crosswalk" / "players_fpl.csv").is_file()
+    assert (isolated_data_root / "crosswalk" / "teams.csv").is_file()
+
+
+def test_crosswalk_validate_with_no_ingested_data_fails_the_gate(
+    isolated_data_root: Path,
+) -> None:
+    result = runner.invoke(app, ["--data-root", str(isolated_data_root), "crosswalk", "validate"])
+    assert result.exit_code == exit_codes.QUALITY_GATE_FAILED
+
+
+def test_backfill_skip_fetch_with_no_raw_data_fails_loudly_on_the_first_season(
+    isolated_data_root: Path,
+) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--data-root",
+            str(isolated_data_root),
+            "backfill",
+            "--from",
+            "2016-17",
+            "--to",
+            "2016-17",
+            "--skip-fetch",
+        ],
+    )
+    assert result.exit_code == exit_codes.FAILURE
+
 
 
 @pytest.mark.parametrize("layer", ["staged", "facts", "both"])

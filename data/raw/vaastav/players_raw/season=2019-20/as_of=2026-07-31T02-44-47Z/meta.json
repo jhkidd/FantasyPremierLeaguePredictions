@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 63287,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "players_raw",
+  "event": null,
+  "fetched_at": "2026-07-31T02:44:47.843921+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 174695,
+  "season": "2019-20",
+  "sha256": "6ebf73e7f4fe0d697869a12cbf39ccb1df444c6b9b1be6c02e61677ebbfc243f",
+  "source": "vaastav",
+  "url": "https://github.com/vaastav/Fantasy-Premier-League/archive/refs/heads/master.tar.gz#data/2019-20/players_raw.csv"
+}

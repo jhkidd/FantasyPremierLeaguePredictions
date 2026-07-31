@@ -114,7 +114,7 @@ class Rules(Protocol):
 # identical in every ruleset and lives here so a shared term can only be
 # fixed, or broken, once.
 
-_GOAL_POINTS: dict[Position, int] = {"GK": 10, "DEF": 6, "MID": 5, "FWD": 4}
+_GOAL_POINTS: dict[Position, int] = {"GK": 6, "DEF": 6, "MID": 5, "FWD": 4}
 _CLEAN_SHEET_POINTS: dict[Position, int] = {"GK": 4, "DEF": 4, "MID": 1, "FWD": 0}
 
 

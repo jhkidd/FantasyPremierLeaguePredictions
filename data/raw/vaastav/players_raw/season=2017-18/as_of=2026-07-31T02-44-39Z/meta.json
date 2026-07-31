@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 49755,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "players_raw",
+  "event": null,
+  "fetched_at": "2026-07-31T02:44:39.375361+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 147514,
+  "season": "2017-18",
+  "sha256": "c40f7e6a74160f3a151fb32ee79d5843e87daf58e1a002ccfff412a224804264",
+  "source": "vaastav",
+  "url": "https://github.com/vaastav/Fantasy-Premier-League/archive/refs/heads/master.tar.gz#data/2017-18/players_raw.csv"
+}

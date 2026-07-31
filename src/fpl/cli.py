@@ -29,6 +29,13 @@ from fpl.config import (
 )
 from fpl.facts.player_fixture import write_player_fixture_facts
 from fpl.facts.points import write_points
+from fpl.identity.players import (
+    build_players_crosswalk,
+    unmapped_players_with_minutes,
+    validate_name_variants,
+    write_players_crosswalk,
+)
+from fpl.identity.teams import build_teams_crosswalk, write_teams_crosswalk
 from fpl.ingest import ingest_fpl
 from fpl.ownership import (
     COHORTS,
@@ -51,6 +58,7 @@ from fpl.sources.errors import BlockedError, SchemaError, SourceError
 from fpl.sources.fpl_api import FplApiConnector
 from fpl.sources.vaastav import VaastavConnector
 from fpl.staging.pipeline import stage_fpl_source, stage_vaastav_source
+from fpl.staging.vaastav import ERA_BY_SEASON
 from fpl.storage import paths
 
 app = typer.Typer(
@@ -529,16 +537,58 @@ def facts(
 
 
 @crosswalk_app.command("refresh")
-def crosswalk_refresh(season: SeasonOption = str(CURRENT_SEASON)) -> None:
-    """Propose new identity mappings for review."""
-    _parse_season(season)
-    _pending(6, "crosswalk refresh")
+def crosswalk_refresh(ctx: typer.Context) -> None:
+    """Rebuild both crosswalks from ingested raw data and write them.
+
+    ``refresh`` (rather than ``validate`` alone) is needed here, unlike the
+    cross-source crosswalk deferred to phase 7, because there is nothing
+    committed yet for a person to review a diff against on the first run."""
+    data_root = _data_root(ctx)
+    seasons = sorted(ERA_BY_SEASON)
+
+    players_crosswalk = build_players_crosswalk(seasons, data_root=data_root)
+    players_path = write_players_crosswalk(players_crosswalk, data_root=data_root)
+    typer.echo(f"players_fpl: written, {players_crosswalk.height} code(s) -> {players_path}")
+
+    teams_crosswalk = build_teams_crosswalk(seasons, data_root=data_root)
+    teams_path = write_teams_crosswalk(teams_crosswalk, data_root=data_root)
+    typer.echo(f"teams: written, {teams_crosswalk.height} row(s) -> {teams_path}")
 
 
 @crosswalk_app.command("validate")
-def crosswalk_validate() -> None:
-    """Fail if any player with minutes is unmapped."""
-    _pending(6, "crosswalk validate")
+def crosswalk_validate(ctx: typer.Context) -> None:
+    """Fail if any player with minutes is unmapped, or a code looks reused."""
+    data_root = _data_root(ctx)
+    seasons = sorted(ERA_BY_SEASON)
+
+    crosswalk = build_players_crosswalk(seasons, data_root=data_root)
+    if crosswalk.height == 0:
+        typer.secho("no players_raw ingested for any season yet", err=True, fg=typer.colors.YELLOW)
+        raise typer.Exit(exit_codes.QUALITY_GATE_FAILED)
+
+    problems = False
+    conflicts = validate_name_variants(crosswalk)
+    for conflict in conflicts:
+        problems = True
+        typer.secho(
+            f"[block] name-variant conflict: code {conflict.player_code} -> "
+            f"{list(conflict.name_variants)}",
+            fg=typer.colors.RED,
+        )
+
+    for season in seasons:
+        unmapped = unmapped_players_with_minutes(season, crosswalk, data_root=data_root)
+        if unmapped:
+            problems = True
+            typer.secho(
+                f"[block] {season}: {len(unmapped)} player(s) with minutes have no "
+                f"player_code mapping: {unmapped[:10]}",
+                fg=typer.colors.RED,
+            )
+
+    if problems:
+        raise typer.Exit(exit_codes.QUALITY_GATE_FAILED)
+    typer.echo(f"crosswalk validate: clean ({crosswalk.height} player code(s))")
 
 
 @app.command()
@@ -583,12 +633,82 @@ def features(
     _pending(8, "features")
 
 
+def _rules_for_season(season: Season) -> str:
+    """The scoring ruleset each backfilled season reconciles against.
+
+    2025/26 is the only season carrying the defensive-contribution term;
+    every earlier season uses the legacy ruleset (spec §15)."""
+    return "2025-26" if season == Season(2025) else "legacy"
+
+
 @app.command()
 def backfill(
+    ctx: typer.Context,
     from_season: Annotated[str, typer.Option("--from")] = "2016-17",
     to_season: Annotated[str, typer.Option("--to")] = "2025-26",
+    skip_fetch: Annotated[
+        bool,
+        typer.Option("--skip-fetch", help="Re-derive from raw already on disk; no network."),
+    ] = False,
 ) -> None:
-    """One-off historical cold start."""
-    _parse_season(from_season)
-    _parse_season(to_season)
-    _pending(6, "backfill")
+    """One-off historical cold start: fetch, stage, facts and check every season.
+
+    Fails loudly on the first season that will not reconcile rather than
+    pressing on — a partial backfill that looks complete is the failure
+    mode the quality gates exist to prevent."""
+    start = _parse_season(from_season)
+    end = _parse_season(to_season)
+    seasons = [s for s in sorted(ERA_BY_SEASON) if start <= s <= end]
+    if not seasons:
+        raise typer.BadParameter("no classified season falls within --from/--to")
+
+    data_root = _data_root(ctx)
+
+    if not skip_fetch:
+        with _source_failures(), VaastavConnector() as connector:
+            for season in seasons:
+                results = connector.fetch_and_store_season(season, data_root=data_root)
+                written = sum(1 for result in results if result.written)
+                typer.echo(f"{season}: fetched, {written}/{len(results)} file(s) written")
+
+    for season in seasons:
+        try:
+            stage_results = stage_vaastav_source(season, data_root=data_root)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        for result in stage_results:
+            typer.echo(f"{season} stage[{result.table}]: {result.rows} row(s)")
+
+        facts_result = write_player_fixture_facts(season, data_root=data_root)
+        if not facts_result.written:
+            typer.secho(
+                f"{season}: player_fixture facts skipped, {facts_result.detail}",
+                err=True,
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(exit_codes.FAILURE)
+
+        rules = _rules_for_season(season)
+        points_result = write_points(season, rules, data_root=data_root)
+        typer.echo(
+            f"{season}: facts {facts_result.frame.height} row(s), "
+            f"points[{rules}] {points_result.frame.height} row(s)"
+        )
+
+        violations = check_staged_tables(season, data_root=data_root)
+        violations.extend(check_facts_tables(season, data_root=data_root))
+        if has_blocking_violations(violations):
+            for violation in violations:
+                if violation.severity == "block":
+                    typer.secho(
+                        f"[block] {season} {violation.gate}: {violation.detail}",
+                        fg=typer.colors.RED,
+                    )
+            typer.secho(
+                f"{season}: did not reconcile; stopping backfill here",
+                err=True,
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(exit_codes.QUALITY_GATE_FAILED)
+
+    typer.echo(f"backfill: {len(seasons)} season(s) reconciled, {seasons[0]}..{seasons[-1]}")

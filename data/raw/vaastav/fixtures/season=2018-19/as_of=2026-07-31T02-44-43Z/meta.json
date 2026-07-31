@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 61262,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "fixtures",
+  "event": null,
+  "fetched_at": "2026-07-31T02:44:43.562121+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 636313,
+  "season": "2018-19",
+  "sha256": "f50cbc202ea89289e359a74c2e82e988965f063f4016bbe49426d3de483cc046",
+  "source": "vaastav",
+  "url": "https://github.com/vaastav/Fantasy-Premier-League/archive/refs/heads/master.tar.gz#data/2018-19/fixtures.csv"
+}

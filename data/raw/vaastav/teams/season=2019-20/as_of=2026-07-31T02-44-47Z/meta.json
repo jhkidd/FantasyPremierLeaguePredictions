@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 750,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "teams",
+  "event": null,
+  "fetched_at": "2026-07-31T02:44:47.843921+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 1704,
+  "season": "2019-20",
+  "sha256": "fbe8ae4036e5cb9e05aba4eb029da73036c76e66ee276b007e8296072af11b22",
+  "source": "vaastav",
+  "url": "https://github.com/vaastav/Fantasy-Premier-League/archive/refs/heads/master.tar.gz#data/2019-20/teams.csv"
+}

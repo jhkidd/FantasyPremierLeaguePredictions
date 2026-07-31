@@ -237,10 +237,12 @@ def stage_vaastav_source(
 ) -> list[StageResult]:
     """Stage vaastav's ``merged_gw.csv`` for one season into ``player_fixture_stats``.
 
-    Only the seasons classified in :data:`fpl.staging.vaastav.ERA_BY_SEASON`
-    can be staged — phase 4 classifies 2025/26 alone (the resequencing
-    decision), so an earlier season raises rather than silently doing
-    nothing.
+    A season absent from :data:`fpl.staging.vaastav.ERA_BY_SEASON` raises
+    rather than silently doing nothing (a new upstream season needs a person
+    to classify its schema first). When that season's ``players_raw.csv``
+    has also been ingested, it is passed through too — required for the
+    three earliest eras (position/team derivation) and used for the stable
+    ``player_code`` field in every other era.
     """
     partition = paths.latest_partition("vaastav", "merged_gw", season, data_root=data_root)
     if partition is None:
@@ -250,7 +252,15 @@ def stage_vaastav_source(
             )
         ]
     body, _meta = read_raw(partition)
-    staged = stage_merged_gw(body, season)
+
+    players_raw_body = None
+    players_raw_partition = paths.latest_partition(
+        "vaastav", "players_raw", season, data_root=data_root
+    )
+    if players_raw_partition is not None:
+        players_raw_body, _meta = read_raw(players_raw_partition)
+
+    staged = stage_merged_gw(body, season, players_raw_body=players_raw_body)
     _write(
         staged.frame,
         "player_fixture_stats",
@@ -263,5 +273,10 @@ def stage_vaastav_source(
         detail_parts.append(f"excluded {staged.excluded_manager_rows} manager-asset row(s)")
     if staged.duplicate_rows_dropped:
         detail_parts.append(f"dropped {staged.duplicate_rows_dropped} exact-duplicate row(s)")
+    if staged.postponed_fixture_placeholders_dropped:
+        detail_parts.append(
+            f"dropped {staged.postponed_fixture_placeholders_dropped} "
+            "postponed-fixture placeholder row(s)"
+        )
     detail = "; ".join(detail_parts)
     return [StageResult("player_fixture_stats", True, staged.frame.height, staged.report, detail)]

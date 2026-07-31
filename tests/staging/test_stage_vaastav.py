@@ -50,9 +50,10 @@ class TestEraForSeason:
         with pytest.raises(ValueError, match="classify"):
             era_for_season(Season(2030))
 
-    def test_era_map_has_exactly_one_entry_in_phase_4(self) -> None:
-        """Phase 6 adds E1-E6; phase 4 deliberately stops at 2025/26 alone."""
-        assert set(ERA_BY_SEASON.values()) == {"E7"}
+    def test_era_map_covers_all_ten_backfilled_seasons(self) -> None:
+        """Phase 6 adds E1-E6; all ten seasons from 2016/17 are classified."""
+        assert set(ERA_BY_SEASON.values()) == {"E1", "E2", "E3", "E4", "E5", "E6", "E7"}
+        assert len(ERA_BY_SEASON) == 10
 
 
 class TestStageMergedGw:
@@ -96,4 +97,4 @@ class TestStageMergedGw:
 
     def test_unclassified_season_raises_before_parsing(self) -> None:
         with pytest.raises(ValueError, match="classify"):
-            stage_merged_gw(_body(_DEFENDER_ROW), Season(2018))
+            stage_merged_gw(_body(_DEFENDER_ROW), Season(2030))

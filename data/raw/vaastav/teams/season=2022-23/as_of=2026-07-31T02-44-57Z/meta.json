@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 734,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "teams",
+  "event": null,
+  "fetched_at": "2026-07-31T02:44:57.208806+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 1711,
+  "season": "2022-23",
+  "sha256": "be6a1fe120a61f9c441a0751ca177c933bcbf234c1d28d49b3cd8827ca18066b",
+  "source": "vaastav",
+  "url": "https://github.com/vaastav/Fantasy-Premier-League/archive/refs/heads/master.tar.gz#data/2022-23/teams.csv"
+}

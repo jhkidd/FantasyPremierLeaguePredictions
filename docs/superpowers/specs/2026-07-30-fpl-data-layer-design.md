@@ -558,6 +558,99 @@ Phases 1–3 are date-critical. Phases 4–5 are the correctness critical path; 
 
 ---
 
+## 17. Phase 6 findings (recorded 2026-07-31)
+
+Phase 6 turned the backfill into a real ten-season, zero-tolerance reconciliation. Four things
+were discovered along the way that were not known when this spec or the phases 4–6 plan were
+written, and all four changed the implementation, not just the documentation.
+
+### 17.1 Two real defects, both fixed
+
+**A genuine scoring bug, not an era difference.** `scoring/base.py` awarded goalkeepers 10
+points for a non-penalty goal (`_GOAL_POINTS["GK"]`). The correct value, confirmed against
+`docs/Fantasy Premier League Scoring.md` and a live web check, is **6** — the same as every
+other outfield position except midfield and forward. This was not a rule that changed between
+rulesets; it was a plain implementation error present in the shared constant since it was
+written, and it silently corrupted every historical goalkeeper-goal row across all three
+rulesets (`legacy`, `2025-26`, `2026-27`) until the ten-season reconciliation surfaced it as a
+single off-by-4-points row (2020/21, fixture 353, player 252). **Lesson for future rulesets:**
+a constant shared across eras must still be verified against the rules text at each new era's
+introduction — "shared" is not the same as "already checked".
+
+**2019/20's COVID-suspension restart produced duplicate placeholder rows.** When the season
+paused and fixtures were rearranged, `gws/merged_gw.csv` retained a stale zero-minutes row for
+the original (postponed) fixture date alongside the real result at the rearranged date, both
+keyed to the same `(element, fixture)` pair. `staging/vaastav.py`'s
+`_drop_postponed_fixture_placeholders()` groups by `(element, fixture)`, keeps only the
+max-`GW` row, and **asserts** every dropped row has `minutes == 0` — a non-zero-minute row would
+mean the heuristic is wrong for that pair and must raise rather than silently drop real data.
+Resolved exactly 59 placeholder rows in 2019/20; every other season was unaffected.
+
+### 17.2 The alphabetical-team-id hypothesis was tried and falsified
+
+Building the teams crosswalk for 2016/17–2018/19 (which publish no `teams.csv`, Finding 4)
+initially assumed FPL's `team_id` was assigned alphabetically by club name within a season, and
+several spot-checks against known players appeared to confirm it. **Real 2025/26 `teams.csv`
+data falsified this**: Burnley is `team_id=3` and Bournemouth is `team_id=4` — the reverse of
+alphabetical order. The correct, and only, safe approach is what §6's identity section already
+prescribed for players: derive identity from the stable `team_code`, never from `team_id`'s
+position or any positional/alphabetical inference. `team_code` was verified genuinely stable by
+building a `team_code → canonical_name` lookup from all seven seasons that do publish
+`teams.csv` (2019/20–2025/26) and asserting zero code-to-name inconsistencies across them (200
+rows: 20 teams × 10 seasons).
+
+The six team codes that never appear in any `teams.csv`-covered season — clubs relegated during
+2016/17–2018/19 and never promoted back by 2025/26 — were identified by unambiguous
+player-to-club verification rather than guesswork, and are recorded with their verifying player
+in `identity/teams.py::_HAND_VERIFIED_CODES`:
+
+| `team_code` | Club | Verified via |
+|---|---|---|
+| 110 | Stoke City | Jack Butland, Ryan Shawcross (2016/17, 2017/18) |
+| 25 | Middlesbrough | Victor Valdés, Daniel Ayala (2016/17) |
+| 80 | Swansea City | Łukasz Fabiański, Ángel Rangel (2016/17, 2017/18) |
+| 88 | Hull City | Allan McGregor, Oumar Niasse (2016/17) |
+| 38 | Huddersfield Town | Jonas Lössl, Christopher Schindler (2017/18, 2018/19) |
+| 97 | Cardiff City | Neil Etheridge, Sol Bamba (2018/19) |
+
+### 17.3 Ten-season reconciliation — the phase 6 gate — passes at zero tolerance
+
+`tests/test_reconciliation.py` parametrizes across all ten `(season, rules)` pairs (`legacy` for
+2016/17–2024/25, `2025-26` for 2025/26) and asserts, per row: derived points equal FPL's
+published `total_points`, no `minutes == 0` row carries positive points, and the
+`(season, fixture_id, player_id)` key is unique. All 30 checks pass. This is the milestone task
+13/19 exist for — nothing built on top of `facts/player_fixture` before this passed would have
+been trustworthy.
+
+### 17.4 BPS reproducibility measurement (task 20)
+
+`notebooks/bps_reproducibility.ipynb` reconstructs every BPS term observable from
+2016/17–2018/19's published inputs (Finding 2) against the official BPS table in
+`docs/Fantasy Premier League Scoring.md`, and compares the total to FPL's own published `bps`
+across 67,936 player-fixture rows. Headline results:
+
+- **Mean residual is small but not zero** (−0.48 BPS overall), with a clear per-position
+  pattern: defenders and goalkeepers are **under**-counted by our reconstruction (mean residual
+  −2.4 and −1.9 BPS respectively), attackers and midfielders are **over**-counted (+1.1 and +0.9
+  BPS), consistent with the missing terms (shots on target, saves in the box, saves from a big
+  chance, goalline clearances, fouls won) being concentrated differently by role.
+- **The residual is not cosmetic where it matters.** Restricting to the top-3 BPS-scoring
+  players per fixture (bonus is awarded on rank, not level), our reconstruction disagrees with
+  FPL's actual top-3 membership in **538 of 1,140 fixtures (47%)**.
+
+**Conclusion, replacing the "model bonus blind from proxies" framing in §4:** bonus is not
+reproducible closely enough from these proxies to be treated as ground truth, and it changes
+who gets bonus points too often to ignore. Bonus must continue to enter facts as FPL's own
+published value (unchanged from the existing locked decision), and any bonus *model* trained on
+the BPS input columns must be evaluated against FPL's actual `bps`/bonus, never against a
+hand-written formula reproducing the rules. The BPS input columns remain valuable model
+*features* — the per-position bias itself is signal — but not a substitute target. The R1
+definition-drift caveat (no overlap season between 2018/19 and 2025/26 to prove Opta's
+definitions held constant) still applies unchanged to this measurement, since it is entirely
+internal to 2016/17–2018/19.
+
+---
+
 ## Appendix A — Prior art reviewed
 
 Consulted during design. Recorded so later subsystems do not have to rediscover them.

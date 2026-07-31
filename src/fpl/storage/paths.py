@@ -17,6 +17,7 @@ from fpl.config import Config, Season
 
 __all__ = [
     "chunk_partition",
+    "crosswalk_file",
     "decode_as_of",
     "encode_as_of",
     "facts_table",
@@ -230,3 +231,12 @@ def facts_table(
     if rules is not None:
         path = path / f"rules={_check_component(rules, label='rules')}"
     return path / f"season={season}"
+
+
+def crosswalk_file(name: str, *, data_root: Path | None = None) -> Path:
+    """A hand-reviewed or generated identity crosswalk, e.g. ``players_fpl.csv``.
+
+    Small and always a single file — never partitioned by season, since the
+    whole point of a crosswalk is to collapse many seasons onto one identity
+    (spec plan §6.2/§6.3)."""
+    return _root(data_root) / "crosswalk" / _check_component(name, label="crosswalk file")

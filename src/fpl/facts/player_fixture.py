@@ -148,18 +148,27 @@ def build_player_fixture_facts(
         return None
     stats = read_parquet(stats_path)
 
-    team_lookup = _team_id_lookup(season, data_root=data_root)
-    if team_lookup is not None:
-        stats = stats.join(team_lookup, left_on="team", right_on="name", how="left")
-    else:
-        stats = stats.with_columns(pl.lit(None, dtype=pl.Int64).alias("team_id"))
+    if "team_id" not in stats.columns:
+        # E4+ carry the own-team as a name string ("team"), resolved here via
+        # the season's staged teams table. E1-E3 already resolved team_id at
+        # staging time (from players_raw's numeric team field), since they
+        # never carry a name column at all — nothing to do for them here.
+        team_lookup = _team_id_lookup(season, data_root=data_root)
+        if team_lookup is not None:
+            stats = stats.join(team_lookup, left_on="team", right_on="name", how="left")
+        else:
+            stats = stats.with_columns(pl.lit(None, dtype=pl.Int64).alias("team_id"))
 
-    stats = stats.rename(
-        {
+    rename_map = {
+        column: target
+        for column, target in {
             "opponent_team": "opponent_team_id",
             "clearances_blocks_interceptions": "cbi",
-        }
-    )
+        }.items()
+        if column in stats.columns
+    }
+    if rename_map:
+        stats = stats.rename(rename_map)
     stats = stats.with_columns(
         pl.col("kickoff_time").str.strptime(
             pl.Datetime(time_unit="us", time_zone="UTC"), strict=False

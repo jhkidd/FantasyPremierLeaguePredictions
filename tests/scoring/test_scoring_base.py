@@ -60,7 +60,7 @@ class TestAppearancePoints:
 class TestGoalPoints:
     @pytest.mark.parametrize(
         ("position", "expected"),
-        [("GK", 10), ("DEF", 6), ("MID", 5), ("FWD", 4)],
+        [("GK", 6), ("DEF", 6), ("MID", 5), ("FWD", 4)],
     )
     def test_per_position(self, position: str, expected: int) -> None:
         assert goal_points(position, 1) == expected  # type: ignore[arg-type]
