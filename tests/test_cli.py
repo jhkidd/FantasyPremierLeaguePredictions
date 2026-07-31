@@ -285,6 +285,122 @@ class TestCaptureOwnershipCommand:
         assert result.exit_code == exit_codes.SUCCESS, result.output
         assert "cohort=mini event=1 entries=2 chunks_written=1" in result.output
 
+    def _mock_entry(self, entry_id: int, classic: list[dict]) -> None:
+        respx.get(f"{fpl_api.BASE_URL}/entry/{entry_id}/").mock(
+            return_value=httpx.Response(
+                200, json={"id": entry_id, "leagues": {"classic": classic, "h2h": []}}
+            )
+        )
+
+    def test_discovers_the_mini_league_from_our_own_team(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nobody has to notice the league was created and paste its ID in."""
+        monkeypatch.setenv("FPL_ENTRY_ID", "2282251")
+        self._bootstrap(deadline=OPEN_DEADLINE)
+        self._mock_entry(
+            2282251,
+            [
+                {"id": 314, "name": "Overall", "league_type": "s"},
+                {"id": 555001, "name": "The Office", "league_type": "x"},
+            ],
+        )
+        result = runner.invoke(
+            app, ["--data-root", str(tmp_path), "capture-ownership", "--dry-run"]
+        )
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert "Discovered mini-league The Office (555001)" in result.output
+        assert "would capture cohort=mini league=555001" in result.output
+
+    def test_an_explicit_league_is_not_overridden_by_discovery(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FPL_ENTRY_ID", "2282251")
+        self._bootstrap(deadline=OPEN_DEADLINE)
+        result = runner.invoke(
+            app,
+            ["--data-root", str(tmp_path), "capture-ownership", "--league", "42", "--dry-run"],
+        )
+        assert "would capture cohort=mini league=42" in result.output
+
+    def test_several_private_leagues_captures_none_and_says_so(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Capturing the wrong opponents is worse than capturing none and
+        being told which candidates exist."""
+        monkeypatch.setenv("FPL_ENTRY_ID", "2282251")
+        self._bootstrap(deadline=OPEN_DEADLINE)
+        self._mock_entry(
+            2282251,
+            [
+                {"id": 111, "name": "Office", "league_type": "x"},
+                {"id": 222, "name": "Family", "league_type": "x"},
+            ],
+        )
+        result = runner.invoke(
+            app, ["--data-root", str(tmp_path), "capture-ownership", "--dry-run"]
+        )
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "Office (111)" in result.output and "Family (222)" in result.output
+        assert "cohort=mini" not in result.output
+
+    def test_our_own_squad_is_captured_from_gameweek_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FPL_ENTRY_ID", "2282251")
+        self._bootstrap(deadline=OPEN_DEADLINE)
+        self._mock_entry(2282251, [])
+        respx.get(f"{fpl_api.BASE_URL}/entry/2282251/event/1/picks/").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "automatic_subs": [],
+                    "picks": [{"element": 1, "position": 1, "multiplier": 1}],
+                },
+            )
+        )
+        result = runner.invoke(
+            app, ["--data-root", str(tmp_path), "capture-ownership", "--cohort", "self"]
+        )
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert "cohort=self event=1 entries=1 chunks_written=1" in result.output
+
+    def test_asking_for_self_without_a_team_is_a_usage_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("FPL_ENTRY_ID", raising=False)
+        self._bootstrap(deadline=OPEN_DEADLINE)
+        result = runner.invoke(
+            app, ["--data-root", str(tmp_path), "capture-ownership", "--cohort", "self"]
+        )
+        assert result.exit_code == exit_codes.USAGE
+
+    def test_discover_league_lists_ids(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FPL_ENTRY_ID", "2282251")
+        self._mock_entry(
+            2282251,
+            [
+                {"id": 314, "name": "Overall", "league_type": "s"},
+                {"id": 555001, "name": "The Office", "league_type": "x"},
+            ],
+        )
+        result = runner.invoke(app, ["--data-root", str(tmp_path), "discover-league"])
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert "555001\tThe Office" in result.output
+        assert "Overall" not in result.output
+
+    def test_discover_league_reports_an_empty_result_plainly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The state today: registered, but the league does not exist yet."""
+        monkeypatch.setenv("FPL_ENTRY_ID", "2282251")
+        self._mock_entry(2282251, [{"id": 314, "name": "Overall", "league_type": "s"}])
+        result = runner.invoke(app, ["--data-root", str(tmp_path), "discover-league"])
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "no private leagues yet" in result.output
+
     @respx.mock
     def test_reports_what_it_wrote(self, tmp_path: Path) -> None:
         fixtures = Path(__file__).resolve().parent / "fixtures" / "fpl"

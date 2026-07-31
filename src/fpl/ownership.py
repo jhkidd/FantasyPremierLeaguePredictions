@@ -30,25 +30,32 @@ from fpl.storage.raw_io import RawArtifact, read_raw, write_chunk, write_raw
 
 __all__ = [
     "CHUNK_SIZE",
+    "COHORTS",
     "ELITE_COHORT",
     "ELITE_FIRST_EVENT",
     "MINI_COHORT",
+    "SELF_COHORT",
     "CaptureOutcome",
     "CaptureTarget",
+    "League",
     "capture_ownership",
     "collect_entry_ids",
     "current_bootstrap",
+    "discover_private_leagues",
     "elite_target",
     "entries_per_page",
     "load_latest_bootstrap",
     "mini_target",
     "resolve_capture_event",
+    "self_target",
 ]
 
 logger = get_logger(__name__)
 
 ELITE_COHORT = "elite"
 MINI_COHORT = "mini"
+SELF_COHORT = "self"
+COHORTS = (SELF_COHORT, MINI_COHORT, ELITE_COHORT)
 
 CHUNK_SIZE = 100
 """Entries per chunk. Small enough that a killed run loses little, large enough
@@ -60,17 +67,25 @@ ELITE_FIRST_EVENT = 2
 
 STANDINGS_PAGE_SIZE = 50
 
+PRIVATE_LEAGUE_TYPE = "x"
+"""FPL marks leagues a person created as ``x`` and leagues everyone is put into
+automatically — Overall, Gameweek 1, country, sponsor — as ``s``."""
+
 
 @dataclass(frozen=True)
 class CaptureTarget:
     """What a single capture run is trying to collect."""
 
     cohort: str
-    league_id: int
+    league_id: int | None
     event: int
     top: int | None = None
     """Cap on entries. ``None`` means take the whole league, which is what a
     mini-league wants and what the overall league must never be given."""
+
+    entry_ids: tuple[int, ...] = ()
+    """Entries named outright, for a cohort that is not defined by a league.
+    The ``self`` cohort is one known manager, so there is no table to page."""
 
 
 @dataclass(frozen=True)
@@ -161,6 +176,11 @@ def collect_entry_ids(
     empty until a gameweek has been scored, and a mini-league is empty until
     people join it.
     """
+    if target.entry_ids:
+        return list(target.entry_ids)
+    if target.league_id is None:
+        raise ValueError(f"cohort {target.cohort!r} has neither a league nor explicit entries")
+
     entry_ids: list[int] = []
     page = 1
     while True:
@@ -374,3 +394,51 @@ def elite_target(event: int, top: int) -> CaptureTarget:
 
 def mini_target(league_id: int, event: int) -> CaptureTarget:
     return CaptureTarget(MINI_COHORT, league_id, event, top=None)
+
+
+def self_target(entry_id: int, event: int) -> CaptureTarget:
+    """Our own squad.
+
+    Captured for the same reason as everyone else's: FPL discards it at season
+    rollover. Without it there is no record of what we actually played, and so
+    no way to measure a recommendation against the decision that was taken —
+    which is the whole of evaluation (spec §2).
+    """
+    return CaptureTarget(SELF_COHORT, None, event, top=None, entry_ids=(entry_id,))
+
+
+@dataclass(frozen=True)
+class League:
+    id: int
+    name: str
+
+
+def discover_private_leagues(
+    connector: FplApiConnector, entry_id: int, *, data_root: Path | None = None
+) -> list[League]:
+    """The leagues this manager joined deliberately, newest first.
+
+    FPL puts everyone into Overall, Gameweek 1, a country league and whatever
+    sponsor league is running; those are marked ``s`` and are not opponents in
+    any meaningful sense. Only ``x`` leagues were created by a person.
+
+    Returns them so the caller can decide. Picking one is a judgement — this
+    function does not make it.
+    """
+    artifact = connector.entry(entry_id)
+    write_raw(artifact, data_root=data_root)
+    payload = json.loads(artifact.body)
+
+    leagues = payload.get("leagues")
+    classic = leagues.get("classic") if isinstance(leagues, dict) else None
+    if not isinstance(classic, list):
+        return []
+
+    found: list[League] = []
+    for row in classic:
+        if not isinstance(row, dict) or row.get("league_type") != PRIVATE_LEAGUE_TYPE:
+            continue
+        league_id, name = row.get("id"), row.get("name")
+        if isinstance(league_id, int) and isinstance(name, str):
+            found.append(League(league_id, name))
+    return found

@@ -16,3 +16,15 @@ def isolated_data_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Itera
     root = tmp_path / "data"
     monkeypatch.setenv("FPL_DATA_ROOT", str(root))
     yield root
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset the team and league variables for every test.
+
+    Both are read from the environment, so a developer who exports their own
+    would silently change what the tests exercise — and the failure would look
+    like a code bug rather than a shell setting. Tests that want them set them.
+    """
+    for name in ("FPL_ENTRY_ID", "FPL_MINI_LEAGUE_ID"):
+        monkeypatch.delenv(name, raising=False)

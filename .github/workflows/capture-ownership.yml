@@ -15,7 +15,7 @@ on:
       cohort:
         description: "Which rivals to capture"
         type: choice
-        options: [all, mini, elite]
+        options: [all, self, mini, elite]
         default: all
       limit:
         description: "Cap entries per cohort (rehearsal)"
@@ -53,6 +53,9 @@ jobs:
       # snapshot's job.
       - name: Capture
         env:
+          FPL_ENTRY_ID: ${{ vars.FPL_ENTRY_ID }}
+          # Optional. Left unset, capture discovers the league from the team
+          # above, so nobody has to notice the moment it is created.
           FPL_MINI_LEAGUE_ID: ${{ vars.FPL_MINI_LEAGUE_ID }}
           # Read through the environment rather than interpolated into the
           # script body: a dispatch input is arbitrary text, and pasting it

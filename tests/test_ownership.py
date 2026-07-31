@@ -14,14 +14,18 @@ from fpl.ownership import (
     ELITE_COHORT,
     ELITE_FIRST_EVENT,
     MINI_COHORT,
+    SELF_COHORT,
     CaptureTarget,
+    League,
     capture_ownership,
     collect_entry_ids,
+    discover_private_leagues,
     elite_target,
     entries_per_page,
     load_latest_bootstrap,
     mini_target,
     resolve_capture_event,
+    self_target,
 )
 from fpl.sources.errors import TransientError
 from fpl.sources.fetcher import HttpFetcher
@@ -344,3 +348,106 @@ class TestCaptureTarget:
     def test_mini_takes_every_member(self) -> None:
         target = mini_target(4321, 5)
         assert target == CaptureTarget(MINI_COHORT, 4321, 5, top=None)
+
+    def test_self_names_one_entry_and_no_league(self) -> None:
+        target = self_target(2282251, 5)
+        assert target.cohort == SELF_COHORT
+        assert target.league_id is None
+        assert target.entry_ids == (2282251,)
+
+
+class TestSelfCohort:
+    """Our own squad expires with everyone else's, and without it there is no
+    way to measure a recommendation against the decision actually taken."""
+
+    def test_named_entries_need_no_standings_request(self, connector: FplApiConnector) -> None:
+        """There is no league table for a cohort of one, so asking for one
+        would 404 on a league ID that does not exist."""
+        with respx.mock:
+            assert collect_entry_ids(connector, self_target(2282251, 1)) == [2282251]
+
+    @respx.mock
+    def test_captures_our_own_picks(self, connector: FplApiConnector) -> None:
+        mock_picks([2282251], 1)
+        outcome = capture_ownership(SEASON, self_target(2282251, 1), connector=connector)
+        assert outcome.entries == 1
+        assert outcome.chunks_written == 1
+
+        chunks = list(paths.iter_chunks("fpl", "entry_picks", SEASON, cohort=SELF_COHORT, event=1))
+        body, _ = read_raw(chunks[0][1])
+        assert [json.loads(line)["entry"] for line in body.splitlines()] == [2282251]
+
+    def test_a_target_with_neither_league_nor_entries_is_a_programming_error(
+        self, connector: FplApiConnector
+    ) -> None:
+        with pytest.raises(ValueError, match="neither a league nor"):
+            collect_entry_ids(connector, CaptureTarget("odd", None, 1))
+
+
+class TestDiscoverPrivateLeagues:
+    """League IDs change every season and are unknown until someone creates the
+    league, so hand-configuring one guarantees a silent gap."""
+
+    def _mock_entry(self, entry_id: int, classic: list[dict]) -> None:
+        respx.get(f"{BASE}/entry/{entry_id}/").mock(
+            return_value=httpx.Response(
+                200, json={"id": entry_id, "leagues": {"classic": classic, "h2h": []}}
+            )
+        )
+
+    @respx.mock
+    def test_ignores_the_leagues_everyone_is_put_into(
+        self, connector: FplApiConnector, tmp_path: Path
+    ) -> None:
+        """Overall, Gameweek 1, country and sponsor leagues are marked 's' and
+        are opponents in no meaningful sense."""
+        self._mock_entry(
+            2282251,
+            [
+                {"id": 314, "name": "Overall", "league_type": "s"},
+                {"id": 261, "name": "England", "league_type": "s"},
+                {"id": 431170, "name": "Adobe Express Badge League", "league_type": "s"},
+                {"id": 555001, "name": "The Office", "league_type": "x"},
+            ],
+        )
+        found = discover_private_leagues(connector, 2282251, data_root=tmp_path)
+        assert found == [League(555001, "The Office")]
+
+    @respx.mock
+    def test_no_private_leagues_yet_is_not_an_error(
+        self, connector: FplApiConnector, tmp_path: Path
+    ) -> None:
+        """The state of a freshly registered team, and of any team before the
+        league admin has recreated the league for the new season."""
+        self._mock_entry(2282251, [{"id": 314, "name": "Overall", "league_type": "s"}])
+        assert discover_private_leagues(connector, 2282251, data_root=tmp_path) == []
+
+    @respx.mock
+    def test_reports_every_private_league_rather_than_choosing(
+        self, connector: FplApiConnector, tmp_path: Path
+    ) -> None:
+        self._mock_entry(
+            2282251,
+            [
+                {"id": 111, "name": "Office", "league_type": "x"},
+                {"id": 222, "name": "Family", "league_type": "x"},
+            ],
+        )
+        found = discover_private_leagues(connector, 2282251, data_root=tmp_path)
+        assert [league.id for league in found] == [111, 222]
+
+    @respx.mock
+    def test_malformed_league_rows_are_skipped_not_fatal(
+        self, connector: FplApiConnector, tmp_path: Path
+    ) -> None:
+        self._mock_entry(
+            2282251,
+            [
+                "nonsense",
+                {"id": "not-an-int", "name": "Bad", "league_type": "x"},
+                {"id": 333, "league_type": "x"},
+                {"id": 444, "name": "Good", "league_type": "x"},
+            ],
+        )
+        found = discover_private_leagues(connector, 2282251, data_root=tmp_path)
+        assert found == [League(444, "Good")]
