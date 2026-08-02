@@ -83,8 +83,8 @@ This was corrected before any implementation began: **§18.1 now splits the sour
 
 Two endpoints, both HTTP only (Finding A, §13):
 
-- `api.clubelo.com/{YYYY-MM-DD}` — every club's rating as of that date. Backfill calls this **once per distinct fixture date across all ten seasons** (Locked decision above), using the day *before* kickoff to avoid same-day leakage. A helper collects the distinct `(date - 1 day)` set from FPL's own `fixtures` staged table before any Elo call is made, so the call count is bounded by real fixture dates, not iterated per fixture.
-- `api.clubelo.com/Fixtures` — forward-looking win/draw/loss probabilities for scheduled matches, used for the current season's remaining fixtures (predictions, not backfill).
+- `api.clubelo.com/{YYYY-MM-DD}` — every club's rating as of that date. Backfill calls this **once per distinct fixture date across all ten seasons** (Locked decision above), using the day *before* kickoff to avoid same-day leakage. A helper collects the distinct `(date - 1 day)` set from FPL's own `fixtures` staged table before any Elo call is made, so the call count is bounded by real fixture dates, not iterated per fixture. Forward-looking predictions read the same endpoint at the current date, since a rating's `From`/`To` validity window already extends into the future until the next match is played.
+- `api.clubelo.com/Fixtures` — **checked live during implementation and dropped, not built.** It exposes a full scoreline/goal-difference probability distribution (`Date,Country,Home,Away,GD<-5,...,R:0-0,R:0-1,...`), not the simple win/draw/loss breakdown the design assumed. Nothing in §18.5's locked columns (`elo_rating`, `opponent_elo_rating`) needs it, and the per-date endpoint above already covers forward-looking ratings — so building a parser for an unused, richer-than-needed shape would be pure YAGNI. Revisit only if a future column set wants match-outcome probabilities directly.
 
 ```python
 class ClubEloConnector:
@@ -92,8 +92,7 @@ class ClubEloConnector:
     SOURCE = "clubelo"
 
     def fetch_ratings(self, as_of_date: date) -> bytes: ...
-    def fetch_upcoming_fixtures(self) -> bytes: ...
-    def artifacts_for_date(self, body: bytes, as_of_date: date) -> list[RawArtifact]: ...
+    def artifact_for_ratings(self, body: bytes, as_of_date: date, season: Season) -> RawArtifact: ...
 ```
 
 Staging (`staging/clubelo.py`): a `TableSpec` for `Rank,Club,Country,Level,Elo,From,To` (Finding: confirmed live CSV shape). `Club` is the source-name column the team crosswalk resolves against (§7.6). `Level` is retained — non-English clubs and lower-division English clubs both appear in a full daily pull, and filtering to Premier League opponents only happens at facts-assembly time (§7.7 downstream), not staging, so the staged table stays a faithful copy of what Club Elo actually published.
