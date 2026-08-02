@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from fpl.config import CURRENT_SEASON, DEFAULT_DATA_ROOT, Config, Season
+from fpl.config import (
+    CURRENT_SEASON,
+    DEFAULT_DATA_ROOT,
+    FOOTBALL_DATA_API_KEY_ENV_VAR,
+    Config,
+    Season,
+)
 
 
 class TestSeasonParsing:
@@ -91,3 +97,40 @@ class TestConfig:
             config.source("fpl_backfill").min_request_interval
             > config.source("fpl").min_request_interval
         )
+
+    def test_footballdataorg_is_more_conservative_than_other_sources(self) -> None:
+        """The one credentialed source has a real, documented rate limit
+        (10 requests/minute) - the others are undocumented community norms."""
+        config = Config.load()
+        assert (
+            config.source("footballdataorg").min_request_interval
+            > config.source("footballdata").min_request_interval
+        )
+
+    def test_openfootball_source_is_declared(self) -> None:
+        assert Config.load().source("openfootball").min_request_interval > 0
+
+
+class TestFootballDataApiKey:
+    def test_reads_key_from_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(FOOTBALL_DATA_API_KEY_ENV_VAR, "a-real-looking-key")
+        assert Config.load().football_data_api_key == "a-real-looking-key"
+
+    def test_unset_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(FOOTBALL_DATA_API_KEY_ENV_VAR, raising=False)
+        assert Config.load().football_data_api_key is None
+
+    def test_blank_is_treated_as_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(FOOTBALL_DATA_API_KEY_ENV_VAR, "   ")
+        assert Config.load().football_data_api_key is None
+
+    def test_key_is_stripped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(FOOTBALL_DATA_API_KEY_ENV_VAR, "  key-with-padding  ")
+        assert Config.load().football_data_api_key == "key-with-padding"
+
+    def test_key_never_appears_in_repr(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A cheap guard against the key ending up in a log line by accident -
+        e.g. an unguarded `logger.debug(config)` somewhere downstream."""
+        monkeypatch.setenv(FOOTBALL_DATA_API_KEY_ENV_VAR, "super-secret-value")
+        config = Config.load()
+        assert "super-secret-value" not in repr(config)

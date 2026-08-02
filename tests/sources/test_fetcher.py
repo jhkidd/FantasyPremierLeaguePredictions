@@ -275,3 +275,28 @@ class TestPoliteness:
         now[0] = 0.5
         client.get(URL)
         assert slept == [1.5]
+
+
+class TestExtraHeaders:
+    @respx.mock
+    def test_extra_headers_are_sent(self) -> None:
+        """football-data.org's X-Auth-Token (plan §7.1/§7.8) - the one
+        credentialed source in this project - is sent this way."""
+        route = respx.get(URL).mock(return_value=httpx.Response(200, json={}))
+        fetcher().get(URL, headers={"X-Auth-Token": "a-key"})
+        assert route.calls[0].request.headers["x-auth-token"] == "a-key"
+
+    @respx.mock
+    def test_extra_headers_do_not_override_user_agent(self) -> None:
+        """The shared fetcher's identity is not a caller's to change - it is
+        what makes our traffic legible to every source we depend on."""
+        route = respx.get(URL).mock(return_value=httpx.Response(200, json={}))
+        fetcher().get(URL, headers={"User-Agent": "something-sneaky/1.0"})
+        assert "example.test" in route.calls[0].request.headers["user-agent"]
+        assert "sneaky" not in route.calls[0].request.headers["user-agent"]
+
+    @respx.mock
+    def test_no_extra_headers_behaves_exactly_as_before(self) -> None:
+        route = respx.get(URL).mock(return_value=httpx.Response(200, json={}))
+        fetcher().get(URL)
+        assert "x-auth-token" not in {k.lower() for k in route.calls[0].request.headers}

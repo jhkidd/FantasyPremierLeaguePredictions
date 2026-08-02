@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
@@ -16,6 +16,7 @@ __all__ = [
     "CURRENT_SEASON",
     "DEFAULT_ELITE_COHORT_SIZE",
     "FIRST_ARCHIVE_SEASON",
+    "FOOTBALL_DATA_API_KEY_ENV_VAR",
     "SOURCES",
     "USER_AGENT",
     "Config",
@@ -95,12 +96,24 @@ SOURCES: Final[dict[str, SourceConfig]] = {
     "clubelo": SourceConfig("clubelo", min_request_interval=2.0, timeout=30.0),
     "footballdata": SourceConfig("footballdata", min_request_interval=2.0, timeout=60.0),
     "vaastav": SourceConfig("vaastav", min_request_interval=1.0, timeout=120.0),
+    # European competition fixtures, fetched as a single tarball like vaastav
+    # (plan §7.4-7.5). Not a per-file sweep, so a generous interval costs
+    # nothing.
+    "openfootball": SourceConfig("openfootball", min_request_interval=1.0, timeout=120.0),
+    # football-data.org's free tier is documented at 10 requests/minute for
+    # registered clients (spec §13). 6.0s enforces that proactively, rather
+    # than relying on 429 backoff after the fact (plan §7.1/R3).
+    "footballdataorg": SourceConfig("footballdataorg", min_request_interval=6.0, timeout=30.0),
 }
 
 DEFAULT_DATA_ROOT: Final = Path("data")
 DATA_ROOT_ENV_VAR: Final = "FPL_DATA_ROOT"
 MINI_LEAGUE_ENV_VAR: Final = "FPL_MINI_LEAGUE_ID"
 ENTRY_ENV_VAR: Final = "FPL_ENTRY_ID"
+FOOTBALL_DATA_API_KEY_ENV_VAR: Final = "FOOTBALL_DATA_API_KEY"
+"""football-data.org's free-tier key (plan §7.1). The one credential in this
+project (spec §13 amendment) - required only for FA Cup / EFL Cup fixtures,
+never for any other source."""
 
 DEFAULT_ELITE_COHORT_SIZE: Final = 1000
 """Entries sampled from the overall league. A cheaper stand-in for the top-10k
@@ -120,6 +133,13 @@ class Config:
     """The user's own team. Needed to capture what we actually played, and to
     discover which private leagues we are in without being told."""
 
+    football_data_api_key: str | None = field(default=None, repr=False)
+    """football-data.org's free-tier key, for FA Cup / EFL Cup fixtures only
+    (plan §7.1). Never logged, never embedded in a URL or raw-artifact
+    metadata - the connector reads it straight from here and sends it as an
+    ``X-Auth-Token`` header. ``repr=False`` so it can never end up in a log
+    line via an accidental ``repr(config)``."""
+
     @classmethod
     def load(cls) -> Config:
         """Build config from the environment.
@@ -134,6 +154,7 @@ class Config:
             data_root=data_root,
             mini_league_id=_read_positive_int(MINI_LEAGUE_ENV_VAR),
             entry_id=_read_positive_int(ENTRY_ENV_VAR),
+            football_data_api_key=_read_secret(FOOTBALL_DATA_API_KEY_ENV_VAR),
         )
 
     def source(self, name: str) -> SourceConfig:
@@ -158,3 +179,15 @@ def _read_positive_int(name: str) -> int | None:
     except ValueError:
         return None
     return value if value > 0 else None
+
+
+def _read_secret(name: str) -> str | None:
+    """A blank or unset environment variable is treated as ``None``.
+
+    Unlike :func:`_read_positive_int`, a malformed value cannot exist here -
+    any non-blank string is a plausible key. Whether it is a *valid* key is
+    for football-data.org to say, at request time (plan §7.8/R4) - never
+    silently, and never by falling back to "source skipped".
+    """
+    raw = os.environ.get(name, "").strip()
+    return raw or None

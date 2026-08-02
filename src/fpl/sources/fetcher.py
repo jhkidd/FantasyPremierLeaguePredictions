@@ -97,19 +97,36 @@ class HttpFetcher:
         if self._owns_client:
             self._client.close()
 
-    def get(self, url: str, params: Mapping[str, Any] | None = None) -> FetchResponse:
+    def get(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> FetchResponse:
         """Fetch a URL, retrying only the failures worth retrying.
 
         The URL is used exactly as given. In particular the scheme is never
         rewritten: Club Elo answers on HTTP and does not respond on HTTPS at
         all (spec §13), so a helpful upgrade would silently break it.
+
+        ``headers`` lets one call add to the default header set - e.g.
+        football-data.org's ``X-Auth-Token`` (plan §7.1/§7.8), the one
+        credentialed source in this project. Applied additively: a caller can
+        never override ``User-Agent`` this way, since the shared fetcher is
+        what makes every source's traffic legible, not the individual caller.
         """
         last_error: SourceError | None = None
+        request_headers = self._headers()
+        default_user_agent = request_headers["User-Agent"]
+        if headers:
+            request_headers.update(headers)
+            request_headers["User-Agent"] = default_user_agent
 
         for attempt in range(1, self.config.max_attempts + 1):
             self.limiter.wait()
             try:
-                response = self._client.get(url, params=params, headers=self._headers())
+                response = self._client.get(url, params=params, headers=request_headers)
             except httpx.TimeoutException as exc:
                 last_error = TransientError(f"timeout: {exc}", url=url)
             except httpx.TransportError as exc:
