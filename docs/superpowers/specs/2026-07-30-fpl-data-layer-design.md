@@ -176,7 +176,7 @@ data/
     fpl/entry_picks/season=2026-27/cohort=self/event=1/chunk=0000/
     fpl/entry_picks/season=2026-27/cohort=mini/event=1/chunk=0000/
     fpl/entry_picks/season=2026-27/cohort=elite/event=2/chunk=0000/
-    vaastav/ understat/ clubelo/ footballdata/ openfootball/
+    vaastav/ understat/ clubelo/ footballdata/ openfootball/ footballdataorg/
 
   staged/
     players/ teams/ fixtures/
@@ -234,7 +234,7 @@ models/
 - **Understat** (via `understatapi`): shot-level xG/xA. **All six covered leagues, not just the Premier League** — EPL, La Liga, Bundesliga, Serie A, Ligue 1, RFPL, from 2014/15. Pulling the others costs little and gives summer signings an xG/xA prior instead of making them cold-start unknowns, which matters most in exactly the early gameweeks where everyone else is guessing. No defensive stats.
 - **Club Elo** (`api.clubelo.com`): free REST team strength ratings, continuously updated.
 - **football-data.co.uk**: results and bookmaker odds, free CSV.
-- **Non-league fixture congestion**: UEFA Champions League / Europa League / Conference League, FA Cup and EFL Cup schedules, from **`openfootball`** (§18.1 — pinned down in the phase 7 design; the credentialed alternatives considered here initially, football-data.org and API-Football, were rejected as conflicting with §13's no-credentials decision). Not available from any other source in scope. Congestion is the main driver of rotation, and rotation is the main source of minutes uncertainty for the expensive assets where minutes matter most.
+- **Non-league fixture congestion**: UEFA Champions League / Europa League / Conference League schedules from **`openfootball`**, and FA Cup / EFL Cup schedules from **football-data.org**'s free tier (§18.1 — pinned down in the phase 7 design, after direct verification found `openfootball` does not maintain domestic cup fixtures per-season; football-data.org's free tier is the one exception to §13's no-credentials default, a single registered API key stored as a repository secret). Not available from any credential-free source in scope. Congestion is the main driver of rotation, and rotation is the main source of minutes uncertainty for the expensive assets where minutes matter most.
 
 **Tier 3 — deferred**, behind the same connector interface: scraped predicted lineups (Fantasy Football Scout, Drafthound), set-piece and penalty-taker designations, forward-looking double/blank gameweek forecasts, paid player-level odds APIs.
 
@@ -464,16 +464,20 @@ Two properties keep this safe rather than lucky: append-only means each commit a
 
 ### Credentials
 
-**No credentials or API keys are required for any source in scope.** Nothing needs to be created, and no repository secrets are needed beyond the `GITHUB_TOKEN` that Actions provides automatically.
+**One documented exception aside, no credentials or API keys are required for any source in
+scope.** No repository secrets are needed beyond the `GITHUB_TOKEN` that Actions provides
+automatically, and one manually-created secret: `FOOTBALL_DATA_API_KEY` (§18.1), for FA Cup / EFL
+Cup fixtures only — no credential-free source covers these.
 
 | Source | Auth | Notes |
 |---|---|---|
 | FPL API | None | The endpoints in scope (`bootstrap-static`, `fixtures`, `event/{gw}/live`, `element-summary`) are all public. Only `my-team` and live own-squad endpoints need a session cookie, and those are out of scope. |
 | Understat | None | Public pages, scraped via `understatapi`. |
 | Club Elo | None | Free public REST API. **HTTP only — `https://api.clubelo.com` does not respond; use `http://`.** Acceptable here as the data is public and non-sensitive, but the connector must not silently upgrade the scheme. |
-| football-data.co.uk | None | Static CSV downloads. |
+| football-data.co.uk | None | Static CSV downloads (results, odds). |
 | vaastav archive | None | Public GitHub repository. |
-| openfootball | None | Public GitHub repositories (`openfootball/champions-league`, `openfootball/england`); fetched as a tarball, same as vaastav (§18.1). |
+| openfootball | None | Public GitHub repositories (`openfootball/champions-league`, for European competition fixtures only — confirmed not to maintain domestic cup fixtures, §18.1); fetched as a tarball, same as vaastav. |
+| football-data.org | **API key**, free tier | The one exception to the no-credentials default (§18.1). Free tier explicitly covers FA Cup and Football League Cup (EFL/Carabao Cup) fixtures, 10 requests/minute for registered clients. Key supplied by the user (an existing personal account) and stored as the repository secret `FOOTBALL_DATA_API_KEY`; the connector reads it from the environment, never commits it, and fails loudly if it is unset rather than silently skipping the source. |
 
 ### Rate limits
 
@@ -484,6 +488,7 @@ Nothing in the free tiers constrains the cadence in §8.
 | FPL API | No published limit. Community norm is 2–5s between requests. | `daily-snapshot` makes 2 requests; `post-gameweek` makes 1. Comfortably inside any plausible limit. |
 | Club Elo | No documented limit. | A handful of requests weekly. |
 | football-data.co.uk | Static files, no limit. | One CSV weekly. |
+| football-data.org | 10 requests/minute (registered, free tier). | One or two requests per gameweek for FA Cup / EFL Cup fixtures — comfortably inside the limit even with retries. |
 | GitHub API | 60/hour unauthenticated; 1,000/hour per repository with `GITHUB_TOKEN`. | Only relevant to the vaastav and openfootball backfills, both of which fetch a **single tarball or shallow clone** rather than hundreds of individual raw-file requests. |
 | Actions minutes | Unlimited for public repositories. | Unconstrained. |
 | Pages bandwidth | 100 GB/month soft limit. | Published artefacts are a few hundred KB. |
@@ -542,7 +547,7 @@ This subsystem is large enough that a single undifferentiated plan would be unwi
 4. **Staging and quality gates.** Typed schemas, `fpl stage`, `quality/` gates between layers. **Extended 2026-07-31:** also includes the vaastav connector (a single tarball fetch, spec §13) and staging for 2025/26 only, pulled forward from phase 6 so phase 5's reconciliation target exists. See `docs/superpowers/plans/2026-07-31-fpl-data-layer-phases-4-6-plan.md`.
 5. **Scoring rules and facts.** `scoring/rules_legacy.py` (2016/17–2024/25), `rules_2025_26.py`, `rules_2026_27.py`, each with golden cases; `facts/` assembly, `fpl facts`. **Ends with the points reconciliation test passing against 2025/26** — the single most important milestone in this subsystem, because it proves the rules are understood.
 6. **Historical backfill and identity.** The remaining six schema eras (2016/17–2024/25) staged, `identity/` crosswalk built on the stable `code` key and validated, `fpl backfill`, reconciliation extended to all ten seasons, and a bounded BPS-reproducibility measurement on 2016/17–2018/19 (§4). Ends with ten seasons of facts, all reconciling.
-7. **Tier 2 sources.** Understat (all six leagues), Club Elo, football-data.co.uk, and cup/European fixture schedules via `openfootball`, through the same connector interface; a new team crosswalk; and the new `facts/team_fixture` table. **See §18 for the full phase 7 design.**
+7. **Tier 2 sources.** Understat (all six leagues), Club Elo, football-data.co.uk, cup/European fixture schedules via `openfootball` and football-data.org, through the same connector interface; a new team crosswalk; and the new `facts/team_fixture` table. **See §18 for the full phase 7 design.**
 8. **Feature library.** `features/` with the registry, `as_of` filtering, and the leakage test.
 9. **Remaining automation.** `post-gameweek`, `pre-deadline` and `weekly-context` workflows, failure-to-issue notification, `status.json`, live schema canary.
 
@@ -659,21 +664,36 @@ Phase 7 stages the four Tier 2 sources named in §6 and assembles one new facts 
 source covers cup and European fixture congestion — and extends identity resolution to a second
 crosswalk (teams) needed by every one of these sources.
 
-### 18.1 Cup/European fixture source: `openfootball`, not a credentialed API
+### 18.1 Cup/European fixture source: `openfootball` for Europe, football-data.org for domestic cups
 
 The phases 1–3 plan flagged this as undecided ("Cup/European fixture source is not yet pinned
-down"), and the candidates surfaced during later research (football-data.org, API-Football) both
-require a free-tier API key. That conflicts with §13's locked decision — **no credentials or API
-keys for any source in scope** — so neither is acceptable here without reopening that decision.
+down"). Initial research pointed at `openfootball` for everything, but direct verification against
+the live repository (not just its README) found it does **not** hold up for domestic cups:
+`openfootball/england`'s season directories contain only league fixtures (Premier League,
+Championship, League One, League Two, National League); FA Cup and EFL Cup appear only as one-off
+RSSSF archival snapshots (a single static 2019/20 file, plus 1870s history) — not maintained
+per-season data usable for a ten-season backfill or forward-looking predictions. This is exactly
+the kind of claim §13's own "tested and cleared" precedent warns against trusting unverified.
 
-**`openfootball`** (`github.com/openfootball/champions-league`, `github.com/openfootball/england`)
-resolves this cleanly: public GitHub repositories, no auth, covering Champions League, Europa
-League, Conference League (from their respective starting seasons through 2025/26) and FA Cup /
-EFL Cup, in a structured plain-text (`football.txt`) format with a JSON mirror
-(`openfootball/football.json`). It is actively maintained in-season, so it serves both historical
-backfill and forward-looking fixture lists. Fetched the same way as `vaastav` — a single tarball
-per repository, never persisted whole, with only the needed files extracted as content-addressed
-raw artifacts (§18.2).
+So the source splits in two:
+
+- **European competitions** (Champions League, Europa League, Conference League): **`openfootball`**
+  (`github.com/openfootball/champions-league`) still resolves this cleanly — public GitHub
+  repository, no auth, structured plain-text (`football.txt`) format with a JSON mirror
+  (`openfootball/football.json`), actively maintained in-season for both historical backfill and
+  forward-looking fixture lists. Fetched the same way as `vaastav` — a single tarball per
+  repository, never persisted whole, with only the needed competition files extracted as
+  content-addressed raw artifacts (§18.2).
+- **FA Cup and EFL Cup**: **football-data.org**'s free tier. Its coverage page confirms both
+  competitions are included in the free tier (`England — FA Cup`, `England — Football League Cup`),
+  at 10 requests/minute for registered clients — comfortably enough for a per-gameweek pull. This
+  is the one exception to §13's no-credentials default, accepted because no credential-free source
+  covers domestic cups. The user already holds a football-data.org account from an earlier project
+  and has stored the API key as the repository secret `FOOTBALL_DATA_API_KEY`; the connector reads
+  it from the environment and fails loudly (not silently) if it is unset. Historical season depth
+  for the FA Cup/EFL Cup competition codes must be confirmed against the live API once implementation
+  starts — the docs describe the shape of the response but not, precisely, how many past seasons
+  are available on the free tier for these two competitions specifically.
 
 ### 18.2 Connectors (`sources/`)
 
@@ -682,12 +702,14 @@ One module per source, each following the existing `HttpFetcher`/`Connector` sha
 | Module | Pattern | Notes |
 |---|---|---|
 | `sources/clubelo.py` | Simple GET, like `fpl_api.py` | **HTTP only** — `api.clubelo.com` does not answer on HTTPS (§13). Daily historical ratings via `api.clubelo.com/YYYY-MM-DD`; forward fixture win/draw/loss probabilities via `api.clubelo.com/Fixtures`. |
-| `sources/openfootball.py` | Tarball fetch, like `vaastav.py` | One archive fetch per repository (`champions-league`, `england`); extracts only the competition files needed (`cl.txt`, `elq.txt`, `fa.txt`, etc.) per season. |
-| `sources/footballdata.py` | Simple GET, static CSV | Results and bookmaker odds, one file per season/division. |
+| `sources/openfootball.py` | Tarball fetch, like `vaastav.py` | One archive fetch for `champions-league`; extracts only the competition files needed (`cl.txt`, `elq.txt`, `confq.txt`, etc.) per season. European competitions only (§18.1). |
+| `sources/footballdata.py` | Simple GET, static CSV | Results and bookmaker odds from football-data.co.uk, one file per season/division. |
+| `sources/footballdataorg.py` | Simple GET, authenticated (`X-Auth-Token` header) | FA Cup and EFL Cup fixtures from football-data.org's free tier (§18.1). The one connector in this phase that requires a credential (`FOOTBALL_DATA_API_KEY`) and respects a 10 requests/minute limit. |
 | `sources/understat.py` | Via `understatapi` | Scraped, not an official API — the one connector in this phase with real fragility risk if the site's structure changes. Built last, after the others prove the pattern still holds. |
 
 `Config.SOURCES` already declares politeness settings for `understat`, `clubelo` and
-`footballdata` (§ config.py); this phase adds an `openfootball` entry alongside them.
+`footballdata` (§ config.py); this phase adds `openfootball` and `footballdataorg` entries
+alongside them.
 
 ### 18.3 Staging (`staging/`)
 
@@ -720,8 +742,9 @@ table. Columns:
 - `elo_rating`, `opponent_elo_rating` — pre-match Club Elo, i.e. the rating as published on the
   fixture's date, never a later-revised value (Elo's daily history does not get revised in place,
   unlike FPL's own overwritten-in-place fields in §7).
-- `cup_fixture_count_prior_N_days` — a fixture-congestion count from `openfootball`'s cup and
-  European schedules, in a trailing window ending strictly before this fixture's kickoff.
+- `cup_fixture_count_prior_N_days` — a fixture-congestion count combining `openfootball`'s
+  European schedules and football-data.org's FA Cup / EFL Cup schedules, in a trailing window
+  ending strictly before this fixture's kickoff.
 - `odds_implied_win_prob`, `odds_implied_draw_prob`, `odds_implied_loss_prob` — from
   football-data.co.uk's published odds, normalised to remove the bookmaker overround.
 
@@ -742,8 +765,9 @@ uniqueness check, the same discipline §6 already requires of `player_fixture`.
 
 Club Elo first (cleanest API, no scraping risk, immediate value) → `openfootball` (same
 tarball pattern already proven by `vaastav`, low risk) → football-data.co.uk (static CSV,
-simple) → Understat last (scraping-based, the only real fragility risk in this phase, and it also
-depends on the player crosswalk being built).
+simple) → football-data.org (the one credentialed connector, simple GET but needs the
+`FOOTBALL_DATA_API_KEY` secret and rate-limit handling) → Understat last (scraping-based, the
+only real fragility risk in this phase, and it also depends on the player crosswalk being built).
 
 ---
 
