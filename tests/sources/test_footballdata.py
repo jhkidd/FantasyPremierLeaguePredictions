@@ -55,6 +55,35 @@ class TestFetchSeason:
         with pytest.raises(SchemaError):
             connector.fetch_season(SEASON)
 
+    @respx.mock
+    def test_a_leading_utf8_bom_does_not_break_the_header_check(
+        self, connector: FootballDataConnector
+    ) -> None:
+        """The live site serves this file with a UTF-8 BOM (confirmed phase 7
+        probing) — a plain ``utf-8`` decode leaves it prefixed onto ``Div``,
+        which then fails the header check even though the file is fine."""
+        respx.get(f"{BASE}/mmz4281/2526/E0.csv").mock(
+            return_value=httpx.Response(200, content=b"\xef\xbb\xbf" + MATCH_CSV.encode())
+        )
+        body = connector.fetch_season(SEASON)
+        assert body == b"\xef\xbb\xbf" + MATCH_CSV.encode()
+
+    @respx.mock
+    def test_a_pre_2019_header_without_a_time_column_is_accepted(
+        self, connector: FootballDataConnector
+    ) -> None:
+        """Seasons before 2019-20 omit ``Time`` entirely (confirmed live
+        backfilling 2016-17 through 2018-19) — the header check must tolerate
+        its absence rather than require a literal prefix match."""
+        legacy_csv = (
+            "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HTHG,HTAG,HTR,Referee,B365H,B365D,B365A\n"
+            "E0,13/08/2016,Burnley,Swansea,0,1,A,0,0,D,J Moss,2.4,3.3,3.0\n"
+        )
+        respx.get(f"{BASE}/mmz4281/2526/E0.csv").mock(
+            return_value=httpx.Response(200, text=legacy_csv)
+        )
+        assert connector.fetch_season(SEASON) == legacy_csv.encode()
+
 
 class TestArtifactForSeason:
     def test_wraps_the_body_for_one_season(self, connector: FootballDataConnector) -> None:

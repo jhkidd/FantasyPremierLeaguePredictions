@@ -23,6 +23,15 @@ with no shared stable key at all. The mechanism:
    signal: a name a source actually published with no matching crosswalk
    row means real Tier 2 activity is invisible to the facts layer.
 
+A source column may hold **several** :data:`ALIAS_SEPARATOR`-joined names
+rather than one — confirmed necessary during the historical backfill
+(2026-08-03), when ``openfootball``'s own ``football.txt`` files turned out
+to spell the same club differently across seasons (``"Manchester City"`` in
+some, ``"Manchester City FC"`` in others). One cell holds every distinct
+alias a source has ever published for that club, so both resolve to the
+same ``team_code`` without a second, un-reviewed fuzzy match at facts-
+assembly time.
+
 ``openfootball_name`` was added to the schema during implementation
 (2026-08-03) - the locked plan's §7.12 table only listed
 ``clubelo_name``/``understat_name``/``footballdata_couk_name``, but
@@ -49,6 +58,7 @@ from fpl.storage import paths
 from fpl.storage.raw_io import partition_as_of, read_raw
 
 __all__ = [
+    "ALIAS_SEPARATOR",
     "TEAM_EXTERNAL_ID_COLUMNS",
     "collect_source_names",
     "draft_team_external_ids",
@@ -120,6 +130,21 @@ def _best_match(source_name: str, fpl_names: dict[str, str]) -> str | None:
     return matches[0] if len(matches) == 1 else None
 
 
+ALIAS_SEPARATOR = "; "
+"""Joins multiple alias strings a single source has published for the same
+club across different seasons into one crosswalk cell (e.g. openfootball's
+``football.txt`` format has switched between ``"Manchester City"`` and
+``"Manchester City FC"`` over the years - both are the same club and both
+must resolve, so a cell holds every distinct alias seen, not just the most
+recent one)."""
+
+
+def _split_aliases(cell: str | None) -> list[str]:
+    if not cell:
+        return []
+    return [alias.strip() for alias in cell.split(ALIAS_SEPARATOR.strip()) if alias.strip()]
+
+
 def draft_team_external_ids(
     fpl_teams: pl.DataFrame,
     *,
@@ -141,12 +166,12 @@ def draft_team_external_ids(
     )
 
     def _match_all(source_names: list[str]) -> dict[str, str]:
-        resolved: dict[str, str] = {}
+        resolved: dict[str, list[str]] = {}
         for source_name in source_names:
             code = _best_match(source_name, fpl_names)
-            if code is not None and code not in resolved:
-                resolved[code] = source_name
-        return resolved
+            if code is not None and source_name not in resolved.get(code, []):
+                resolved.setdefault(code, []).append(source_name)
+        return {code: ALIAS_SEPARATOR.join(aliases) for code, aliases in resolved.items()}
 
     by_column = {
         "clubelo_name": _match_all(list(clubelo_names)),
@@ -213,10 +238,18 @@ def unmapped_source_names(
     """Names a source actually published for which no crosswalk row's
     ``source_column`` matches - the hard-fail signal for ``crosswalk
     validate`` (plan §7.12, point 3): a club with real Tier 2 activity but
-    no reviewed mapping must stop the build, not silently vanish."""
+    no reviewed mapping must stop the build, not silently vanish.
+
+    Each cell may hold several ``ALIAS_SEPARATOR``-joined names (a source
+    that has published more than one spelling for the same club across
+    seasons), so membership is checked against every alias, not the raw
+    cell string."""
     if source_column not in _SOURCE_COLUMNS:
         raise ValueError(f"unknown source column: {source_column!r}")
-    known = set(crosswalk[source_column].drop_nulls().to_list()) if crosswalk.height else set()
+    known: set[str] = set()
+    if crosswalk.height:
+        for cell in crosswalk[source_column].to_list():
+            known.update(_split_aliases(cell))
     return sorted(set(source_names) - known)
 
 

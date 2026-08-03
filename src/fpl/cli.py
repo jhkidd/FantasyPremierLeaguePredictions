@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -61,12 +61,22 @@ from fpl.ownership import (
 )
 from fpl.quality.checks import check_facts_tables, check_staged_tables
 from fpl.quality.gates import has_blocking_violations
+from fpl.sources.clubelo import ClubEloConnector
 from fpl.sources.errors import BlockedError, SchemaError, SourceError
+from fpl.sources.footballdata import FootballDataConnector
 from fpl.sources.fpl_api import FplApiConnector
+from fpl.sources.openfootball import OpenfootballConnector
 from fpl.sources.vaastav import VaastavConnector
-from fpl.staging.pipeline import stage_fpl_source, stage_vaastav_source
+from fpl.staging.pipeline import (
+    stage_clubelo_source,
+    stage_footballdata_source,
+    stage_fpl_source,
+    stage_openfootball_source,
+    stage_vaastav_source,
+)
 from fpl.staging.vaastav import ERA_BY_SEASON
 from fpl.storage import paths
+from fpl.storage.raw_io import write_raw
 
 app = typer.Typer(
     name="fpl",
@@ -167,6 +177,13 @@ def ingest(
     force: Annotated[
         bool, typer.Option("--force", help="Write even if the content is unchanged.")
     ] = False,
+    as_of_date: Annotated[
+        str | None,
+        typer.Option(
+            "--as-of-date",
+            help="Club Elo only: date to fetch ratings for (YYYY-MM-DD). Defaults to today.",
+        ),
+    ] = None,
 ) -> None:
     """Pull from a source into data/raw/."""
     parsed = _parse_season(season)
@@ -178,9 +195,36 @@ def ingest(
             )
         written = sum(1 for result in results if result.written)
         typer.echo(
-            f"{len(results)} file(s) pulled, {written} written, "
-            f"{len(results) - written} unchanged"
+            f"{len(results)} file(s) pulled, {written} written, {len(results) - written} unchanged"
         )
+        return
+
+    if source == "openfootball":
+        with _source_failures(), OpenfootballConnector() as connector:
+            results = connector.fetch_and_store_season(
+                parsed, force=force, data_root=_data_root(ctx)
+            )
+        written = sum(1 for result in results if result.written)
+        typer.echo(
+            f"{len(results)} file(s) pulled, {written} written, {len(results) - written} unchanged"
+        )
+        return
+
+    if source == "footballdata":
+        with _source_failures(), FootballDataConnector() as connector:
+            body = connector.fetch_season(parsed)
+            artifact = connector.artifact_for_season(body, parsed)
+        result = write_raw(artifact, force=force, data_root=_data_root(ctx))
+        typer.echo(f"1 endpoint(s) pulled, {1 if result.written else 0} written")
+        return
+
+    if source == "clubelo":
+        parsed_date = date.fromisoformat(as_of_date) if as_of_date else datetime.now(UTC).date()
+        with _source_failures(), ClubEloConnector() as connector:
+            body = connector.fetch_ratings(parsed_date)
+            artifact = connector.artifact_for_ratings(body, parsed_date, parsed)
+        result = write_raw(artifact, force=force, data_root=_data_root(ctx))
+        typer.echo(f"1 endpoint(s) pulled, {1 if result.written else 0} written")
         return
 
     if source != "fpl":
@@ -489,12 +533,18 @@ def stage(
 ) -> None:
     """Transform data/raw/ into typed tables in data/staged/."""
     parsed = _parse_season(season)
-    if source not in {"fpl", "vaastav"}:
+    if source not in {"fpl", "vaastav", "clubelo", "footballdata", "openfootball"}:
         _pending(4, f"stage {source}")
 
     tables = {t.strip() for t in table.split(",")} if table else None
     if source == "fpl":
         results = stage_fpl_source(parsed, data_root=_data_root(ctx), tables=tables)
+    elif source == "clubelo":
+        results = stage_clubelo_source(parsed, data_root=_data_root(ctx))
+    elif source == "footballdata":
+        results = stage_footballdata_source(parsed, data_root=_data_root(ctx))
+    elif source == "openfootball":
+        results = stage_openfootball_source(parsed, data_root=_data_root(ctx))
     else:
         try:
             results = stage_vaastav_source(parsed, data_root=_data_root(ctx))

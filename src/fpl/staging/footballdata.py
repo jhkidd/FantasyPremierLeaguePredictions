@@ -29,6 +29,7 @@ __all__ = ["MATCHES_AND_ODDS_SPEC", "StagedMatchesAndOdds", "stage_matches_and_o
 MATCHES_AND_ODDS_SPEC = TableSpec(
     table="footballdata_matches_and_odds",
     key=("match_date", "home_team", "away_team"),
+    encoding="utf-8-sig",
     columns=(
         ColumnSpec("match_date", "Date", pl.Utf8),
         ColumnSpec("home_team", "HomeTeam", pl.Utf8),

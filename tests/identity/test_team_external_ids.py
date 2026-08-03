@@ -99,6 +99,27 @@ class TestDraftTeamExternalIds:
         draft = draft_team_external_ids(ambiguous_fpl_teams, understat_names=["United"])
         assert draft["understat_name"].to_list() == [None, None]
 
+    def test_multiple_source_names_for_one_club_are_joined_with_the_alias_separator(
+        self,
+    ) -> None:
+        """openfootball spells the same club differently across seasons
+        (``"Manchester City"`` vs ``"Manchester City FC"``) - both must
+        resolve to the same team_code and both must survive into the cell,
+        not just the first or last one seen."""
+        draft = draft_team_external_ids(
+            FPL_TEAMS_REAL,
+            openfootball_names=["Manchester United", "Manchester United FC"],
+        )
+        row = draft.filter(pl.col("team_code") == "3").row(0, named=True)
+        assert row["openfootball_name"] == "Manchester United; Manchester United FC"
+
+    def test_the_same_alias_seen_twice_is_not_duplicated(self) -> None:
+        draft = draft_team_external_ids(
+            FPL_TEAMS_REAL, openfootball_names=["Arsenal FC", "Arsenal FC"]
+        )
+        row = draft.filter(pl.col("team_code") == "43").row(0, named=True)
+        assert row["openfootball_name"] == "Arsenal FC"
+
 
 class TestLoadWriteTeamExternalIds:
     def test_load_with_nothing_committed_returns_empty_typed_frame(self, tmp_path: Path) -> None:
@@ -194,6 +215,25 @@ class TestUnmappedSourceNames:
         crosswalk = load_team_external_ids(data_root=tmp_path / "data")
         with pytest.raises(ValueError, match="unknown source column"):
             unmapped_source_names([], crosswalk, "team_code")
+
+    def test_every_alias_in_a_multi_alias_cell_is_recognised(self) -> None:
+        """A cell holding ``"Manchester City; Manchester City FC"`` must
+        clear both spellings, not just the literal cell string."""
+        crosswalk = pl.DataFrame(
+            {
+                "team_code": ["43"],
+                "clubelo_name": [None],
+                "understat_name": [None],
+                "footballdata_couk_name": [None],
+                "openfootball_name": ["Manchester City; Manchester City FC"],
+            }
+        )
+        unmapped = unmapped_source_names(
+            ["Manchester City", "Manchester City FC", "Mystery FC"],
+            crosswalk,
+            "openfootball_name",
+        )
+        assert unmapped == ["Mystery FC"]
 
 
 class TestCollectSourceNames:

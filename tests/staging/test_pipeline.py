@@ -6,7 +6,13 @@ from pathlib import Path
 from fpl.config import Season
 from fpl.quality.checks import check_staged_tables
 from fpl.quality.gates import has_blocking_violations
-from fpl.staging.pipeline import stage_fpl_source, stage_vaastav_source
+from fpl.staging.pipeline import (
+    stage_clubelo_source,
+    stage_footballdata_source,
+    stage_fpl_source,
+    stage_openfootball_source,
+    stage_vaastav_source,
+)
 from fpl.storage.raw_io import RawArtifact, write_raw
 
 SEASON = Season(2026)
@@ -76,6 +82,150 @@ def _write_fixtures(data_root: Path, moment: datetime) -> None:
         connector_version="1",
     )
     write_raw(artifact, data_root=data_root)
+
+
+RATINGS_CSV = (
+    b"Rank,Club,Country,Level,Elo,From,To\n"
+    b"1,Arsenal,ENG,1,2063.7578125,2025-05-31,2025-08-21\n"
+    b"2,Man City,ENG,1,2029.451171875,2025-05-31,2025-08-21\n"
+)
+
+MATCH_CSV = (
+    b"Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HTHG,HTAG,HTR\n"
+    b"E0,15/08/2025,20:00,Liverpool,Bournemouth,4,2,H,1,0,H\n"
+    b"E0,16/08/2025,12:30,Aston Villa,Newcastle,0,0,D,0,0,D\n"
+)
+
+CL_EXCERPT = """\
+▪ League, Matchday 1
+  Tue Sep 16 2025
+    18:45  Athletic Club (ESP)     v Arsenal FC (ENG)         0-2 (0-0)
+""".encode()
+
+
+def _write_clubelo_ratings(
+    data_root: Path, moment: datetime, season: Season, *, body: bytes = RATINGS_CSV
+) -> None:
+    artifact = RawArtifact(
+        source="clubelo",
+        endpoint="ratings",
+        season=season,
+        url=f"https://api.clubelo.com/{moment.date().isoformat()}",
+        http_status=200,
+        body=body,
+        fetched_at=moment,
+        connector_version="1",
+        content_type="csv",
+    )
+    write_raw(artifact, data_root=data_root)
+
+
+def _write_footballdata_matches(data_root: Path, moment: datetime, season: Season) -> None:
+    artifact = RawArtifact(
+        source="footballdata",
+        endpoint="matches_and_odds",
+        season=season,
+        url="https://www.football-data.co.uk/mmz4281/2526/E0.csv",
+        http_status=200,
+        body=MATCH_CSV,
+        fetched_at=moment,
+        connector_version="1",
+        content_type="csv",
+    )
+    write_raw(artifact, data_root=data_root)
+
+
+def _write_openfootball_champions_league(data_root: Path, moment: datetime, season: Season) -> None:
+    artifact = RawArtifact(
+        source="openfootball",
+        endpoint="champions_league",
+        season=season,
+        url="https://raw.githubusercontent.com/openfootball/champions-league/master/2025-26/cl.txt",
+        http_status=200,
+        body=CL_EXCERPT,
+        fetched_at=moment,
+        connector_version="1",
+        content_type="text",
+    )
+    write_raw(artifact, data_root=data_root)
+
+
+class TestStageClubeloSourceEndToEnd:
+    def test_stages_ratings(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        _write_clubelo_ratings(data_root, datetime(2025, 8, 15, tzinfo=UTC), VAASTAV_SEASON)
+
+        [result] = stage_clubelo_source(VAASTAV_SEASON, data_root=data_root)
+        assert result.table == "clubelo_ratings"
+        assert result.written
+        assert result.rows == 2
+
+        out_path = (
+            data_root / "staged" / "clubelo_ratings" / "season=2025-26" / "part.parquet"
+        )
+        assert out_path.exists()
+
+    def test_multiple_as_of_captures_concatenate(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        later_ratings = RATINGS_CSV.replace(b"2063.7578125", b"2070.1")
+        _write_clubelo_ratings(data_root, datetime(2025, 8, 15, tzinfo=UTC), VAASTAV_SEASON)
+        _write_clubelo_ratings(
+            data_root, datetime(2025, 8, 22, tzinfo=UTC), VAASTAV_SEASON, body=later_ratings
+        )
+
+        [result] = stage_clubelo_source(VAASTAV_SEASON, data_root=data_root)
+        assert result.rows == 4
+
+    def test_no_capture_on_disk_reports_not_written(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        [result] = stage_clubelo_source(VAASTAV_SEASON, data_root=data_root)
+        assert not result.written
+        assert "no clubelo ratings capture on disk" in result.detail
+
+
+class TestStageFootballdataSourceEndToEnd:
+    def test_stages_matches_and_odds(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        _write_footballdata_matches(data_root, datetime(2025, 8, 20, tzinfo=UTC), VAASTAV_SEASON)
+
+        [result] = stage_footballdata_source(VAASTAV_SEASON, data_root=data_root)
+        assert result.table == "footballdata_matches_and_odds"
+        assert result.written
+        assert result.rows == 2
+
+    def test_no_capture_on_disk_reports_not_written(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        [result] = stage_footballdata_source(VAASTAV_SEASON, data_root=data_root)
+        assert not result.written
+        assert "no footballdata matches_and_odds capture on disk" in result.detail
+
+
+class TestStageOpenfootballSourceEndToEnd:
+    def test_stages_each_captured_competition(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        _write_openfootball_champions_league(
+            data_root, datetime(2025, 9, 17, tzinfo=UTC), VAASTAV_SEASON
+        )
+
+        results = stage_openfootball_source(VAASTAV_SEASON, data_root=data_root)
+        [result] = [r for r in results if r.written]
+        assert result.table == "openfootball_fixtures[champions_league]"
+        assert result.rows == 1
+
+        out_path = (
+            data_root
+            / "staged"
+            / "openfootball_fixtures"
+            / "season=2025-26"
+            / "competition=champions_league.parquet"
+        )
+        assert out_path.exists()
+
+    def test_no_competition_captured_reports_not_written(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        [result] = stage_openfootball_source(VAASTAV_SEASON, data_root=data_root)
+        assert not result.written
+        assert "no openfootball capture on disk" in result.detail
 
 
 class TestStageFplSourceEndToEnd:

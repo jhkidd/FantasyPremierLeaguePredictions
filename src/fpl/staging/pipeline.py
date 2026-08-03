@@ -15,7 +15,10 @@ from pathlib import Path
 import polars as pl
 
 from fpl.config import Config, Season
+from fpl.sources.openfootball import SEASON_FILES as _OPENFOOTBALL_ENDPOINTS
 from fpl.staging.base import StagingReport
+from fpl.staging.clubelo import stage_ratings
+from fpl.staging.footballdata import stage_matches_and_odds
 from fpl.staging.fpl_api import (
     stage_availability_snapshots,
     stage_bootstrap_static,
@@ -24,12 +27,20 @@ from fpl.staging.fpl_api import (
     stage_manager_picks,
     stage_price_snapshots,
 )
+from fpl.staging.openfootball import stage_fixtures as stage_openfootball_fixtures
 from fpl.staging.vaastav import stage_merged_gw
 from fpl.storage import paths
 from fpl.storage.parquet_io import write_parquet
 from fpl.storage.raw_io import partition_as_of, read_raw
 
-__all__ = ["StageResult", "stage_fpl_source", "stage_vaastav_source"]
+__all__ = [
+    "StageResult",
+    "stage_clubelo_source",
+    "stage_footballdata_source",
+    "stage_fpl_source",
+    "stage_openfootball_source",
+    "stage_vaastav_source",
+]
 
 _COHORTS = ("self", "mini", "elite")
 
@@ -280,3 +291,105 @@ def stage_vaastav_source(
         )
     detail = "; ".join(detail_parts)
     return [StageResult("player_fixture_stats", True, staged.frame.height, staged.report, detail)]
+
+
+def stage_clubelo_source(
+    season: Season,
+    *,
+    data_root: Path | None = None,
+) -> list[StageResult]:
+    """Stage every Club Elo ``ratings`` capture on disk for one season.
+
+    Unlike the FPL price/availability snapshots this mirrors the shape of,
+    each capture is its own ``as_of=`` partition rather than needing a
+    combined history frame passed in one call — every captured day is staged
+    independently and concatenated, so a rebuild from raw stays idempotent.
+    """
+    captures = list(paths.iter_as_of_partitions("clubelo", "ratings", season, data_root=data_root))
+    if not captures:
+        return [
+            StageResult("clubelo_ratings", False, 0, None, "no clubelo ratings capture on disk")
+        ]
+
+    frames = []
+    report: StagingReport | None = None
+    for partition in captures:
+        body, _meta = read_raw(partition)
+        as_of_date = partition_as_of(partition).date()
+        staged = stage_ratings(body, as_of_date, season)
+        frames.append(staged.frame)
+        report = staged.report
+    combined = pl.concat(frames).unique(subset=["as_of_date", "club"], keep="last")
+    _write(combined, "clubelo_ratings", season, ("as_of_date", "club"), data_root=data_root)
+    return [StageResult("clubelo_ratings", True, combined.height, report)]
+
+
+def stage_footballdata_source(
+    season: Season,
+    *,
+    data_root: Path | None = None,
+) -> list[StageResult]:
+    """Stage football-data.co.uk's one match-and-odds CSV for one season."""
+    partition = paths.latest_partition(
+        "footballdata", "matches_and_odds", season, data_root=data_root
+    )
+    if partition is None:
+        return [
+            StageResult(
+                "footballdata_matches_and_odds",
+                False,
+                0,
+                None,
+                "no footballdata matches_and_odds capture on disk",
+            )
+        ]
+    body, _meta = read_raw(partition)
+    staged = stage_matches_and_odds(body, season)
+    _write(
+        staged.frame,
+        "footballdata_matches_and_odds",
+        season,
+        ("match_date", "home_team", "away_team"),
+        data_root=data_root,
+    )
+    return [StageResult("footballdata_matches_and_odds", True, staged.frame.height, staged.report)]
+
+
+def stage_openfootball_source(
+    season: Season,
+    *,
+    data_root: Path | None = None,
+) -> list[StageResult]:
+    """Stage every `openfootball/champions-league` file captured for one season.
+
+    A competition file that was never captured (e.g. no tracked club reached
+    the Conference League qualifying rounds that season) is a legitimate,
+    silent absence, not a defect (mirrors ``sources/openfootball.py``'s own
+    per-file optionality) — each of :data:`_OPENFOOTBALL_ENDPOINTS`'s
+    endpoints is staged independently.
+    """
+    results: list[StageResult] = []
+    for endpoint in _OPENFOOTBALL_ENDPOINTS.values():
+        partition = paths.latest_partition("openfootball", endpoint, season, data_root=data_root)
+        if partition is None:
+            continue
+        body, _meta = read_raw(partition)
+        staged = stage_openfootball_fixtures(body, season, endpoint)
+        _write(
+            staged.frame,
+            "openfootball_fixtures",
+            season,
+            ("competition", "match_date", "home_team", "away_team"),
+            data_root=data_root,
+            filename=f"competition={endpoint}.parquet",
+        )
+        results.append(
+            StageResult(
+                f"openfootball_fixtures[{endpoint}]", True, staged.frame.height, staged.report
+            )
+        )
+    if not results:
+        return [
+            StageResult("openfootball_fixtures", False, 0, None, "no openfootball capture on disk")
+        ]
+    return results

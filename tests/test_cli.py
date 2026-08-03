@@ -70,6 +70,25 @@ def test_stage_vaastav_with_no_raw_data_reports_nothing_captured(
     assert "no vaastav merged_gw capture on disk" in result.output
 
 
+@pytest.mark.parametrize(
+    "source, expected_detail",
+    [
+        ("clubelo", "no clubelo ratings capture on disk"),
+        ("footballdata", "no footballdata matches_and_odds capture on disk"),
+        ("openfootball", "no openfootball capture on disk"),
+    ],
+)
+def test_stage_tier2_sources_with_no_raw_data_reports_nothing_captured(
+    isolated_data_root: Path, source: str, expected_detail: str
+) -> None:
+    result = runner.invoke(
+        app,
+        ["--data-root", str(isolated_data_root), "stage", source, "--season", "2025-26"],
+    )
+    assert result.exit_code == exit_codes.SUCCESS
+    assert expected_detail in result.output
+
+
 def test_facts_with_no_staged_data_reports_nothing_to_assemble(
     isolated_data_root: Path,
 ) -> None:

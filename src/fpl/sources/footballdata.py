@@ -24,12 +24,15 @@ PREMIER_LEAGUE_DIVISION = "E0"
 against ``mmz4281/2526/E0.csv`` during phase 7 probing (plan Finding C).
 No other division is in scope for this project."""
 
-_EXPECTED_HEADER_PREFIX = "Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR"
+_EXPECTED_HEADER_COLUMNS = ("Div", "Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR")
 """Just enough of the confirmed live header to catch a genuinely different
 file (an HTML error page, an empty response) without pinning down the
 dozens of bookmaker-odds columns that vary release to release — the same
 "shallow sanity check, not a schema" philosophy as every other connector's
-header check."""
+header check. Checked as a set, not a literal prefix: seasons before
+2019-20 omit the ``Time`` column entirely (confirmed live backfilling
+2016-17 through 2018-19), so requiring it verbatim would reject a
+genuinely valid, just older, file."""
 
 
 def url_for_season(season: Season, *, base_url: str = BASE_URL) -> str:
@@ -77,8 +80,9 @@ class FootballDataConnector:
     def fetch_season(self, season: Season) -> bytes:
         url = url_for_season(season, base_url=self.base_url)
         response = self.fetcher.get(url)
-        first_line = response.body.split(b"\n", 1)[0].decode("utf-8", errors="replace").strip()
-        if not first_line.startswith(_EXPECTED_HEADER_PREFIX):
+        first_line = response.body.split(b"\n", 1)[0].decode("utf-8-sig", errors="replace").strip()
+        header_columns = set(first_line.split(","))
+        if not set(_EXPECTED_HEADER_COLUMNS).issubset(header_columns):
             raise SchemaError(
                 f"{url} did not return the expected football-data.co.uk header: {first_line!r}"
             )

@@ -54,3 +54,11 @@ class TestStageMatchesAndOdds:
         assert result.report.rows_in == 2
         assert result.report.rows_out == 2
         assert result.report.table == MATCHES_AND_ODDS_SPEC.table
+
+    def test_a_leading_utf8_bom_does_not_corrupt_the_first_column(self) -> None:
+        """The live file is served with a UTF-8 BOM (confirmed phase 7
+        probing) — decoded as plain ``utf-8`` it lands on the ``Div`` header
+        cell and silently drops every row (no column named ``Div`` matches)."""
+        result = stage_matches_and_odds(b"\xef\xbb\xbf" + MATCH_CSV, SEASON)
+        assert result.frame.height == 2
+        assert result.frame.row(0, named=True)["home_team"] == "Liverpool"

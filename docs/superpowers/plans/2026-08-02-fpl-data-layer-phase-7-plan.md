@@ -237,6 +237,13 @@ Only ~25–30 distinct clubs span ten seasons across three sources — the same 
 
 **Tests:** the draft step correctly proposes matches for the ~10 known short-form/full-name pairs surfaced during probing (`Man City`↔`Manchester City`, `Spurs`↔`Tottenham`, `Newcastle`↔`Newcastle United`); a `crosswalk refresh` run twice never alters an already-reviewed row; an unmapped club with Tier 2 data present is a hard validation failure.
 
+**Update 2026-08-03 (review complete):** `crosswalk/team_external_ids.csv` is hand-reviewed and committed; `fpl crosswalk validate` is clean. Two implementation-time findings surfaced while filling it in:
+
+- **`ingest`/`stage` never actually dispatched on `clubelo`/`footballdata`/`openfootball`** — tasks 4–6 built the connectors and staging modules, but `cli.py` still only recognised `fpl`/`vaastav` and hit the phase-7 `_pending` stub for everything else, so no raw data existed for these sources to draft a crosswalk from at all. Closed by wiring all three into both commands (mirrors §7.14's already-planned surface — no new subcommand shape, just the missing dispatch branches).
+- **A source column can hold more than one name for the same club.** `openfootball`'s own `football.txt` spells some clubs differently across seasons (`"Manchester City"` vs `"Manchester City FC"`). Rather than pick one and lose the other, each cell may now hold several `"; "`-joined aliases (`ALIAS_SEPARATOR` in `identity/team_external_ids.py`) — every alias a source has ever published for that club, all resolving to the same `team_code`.
+
+Two real bugs were also found and fixed against live data during the historical backfill needed to populate this crosswalk (not specific to the crosswalk itself, but discovered here): football-data.co.uk serves its CSV with a leading UTF-8 BOM (broke the connector's header check — fixed via `utf-8-sig` decoding), and seasons before 2019-20 omit the `Time` column entirely (broke a strict header-prefix check — loosened to a subset-of-columns check). Club Elo's historical backfill (2016-17 through 2024-25) remains outstanding: the live service has been returning `502` for every date tried, confirmed as a genuine external outage rather than a sandbox/VPN issue — current-season Elo ratings (2025-26, 2026-27) are captured and sufficient for this crosswalk; the historical gap is tracked for a later retry.
+
 ## 7.13 `facts/team_fixture` — `src/fpl/facts/team_fixture.py`
 
 **Goal:** the phase's one new facts table, at grain `(season, fixture_id, team_id)`, assembled by joining the staged Tier 2 tables through the team crosswalk and FPL's own `fixtures` staged table (mirroring `build_player_fixture_facts`'s shape, spec §18.5):
