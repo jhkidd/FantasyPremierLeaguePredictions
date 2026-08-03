@@ -1,0 +1,19 @@
+{
+  "cohort": null,
+  "compressed_bytes": 86715,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "league_data",
+  "event": null,
+  "fetched_at": "2026-08-03T18:52:12.673391+00:00",
+  "http_status": 200,
+  "params": {
+    "league": "EPL",
+    "season": 2018
+  },
+  "raw_bytes": 517852,
+  "season": "2018-19",
+  "sha256": "e55c7215521b439e43ca5d21dfc0d3292ad67651fd222f30283ddba612cbe308",
+  "source": "understat",
+  "url": "https://understat.com/getLeagueData/EPL/2018"
+}

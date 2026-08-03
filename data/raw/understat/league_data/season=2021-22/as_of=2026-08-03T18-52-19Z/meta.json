@@ -1,0 +1,19 @@
+{
+  "cohort": null,
+  "compressed_bytes": 88531,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "league_data",
+  "event": null,
+  "fetched_at": "2026-08-03T18:52:19.710087+00:00",
+  "http_status": 200,
+  "params": {
+    "league": "EPL",
+    "season": 2021
+  },
+  "raw_bytes": 528968,
+  "season": "2021-22",
+  "sha256": "278297ea4e27dcd7d4bf336b0228ada236c11d9de11c258f8f547d49848ff0d6",
+  "source": "understat",
+  "url": "https://understat.com/getLeagueData/EPL/2021"
+}

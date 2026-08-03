@@ -35,6 +35,16 @@ from fpl.identity.players import (
     validate_name_variants,
     write_players_crosswalk,
 )
+from fpl.identity.players_understat import (
+    load_players_understat_crosswalk,
+    unmapped_understat_players_with_minutes,
+)
+from fpl.identity.players_understat import (
+    refresh_players_crosswalk as refresh_players_understat_crosswalk,
+)
+from fpl.identity.players_understat import (
+    write_players_crosswalk as write_players_understat_crosswalk,
+)
 from fpl.identity.team_external_ids import (
     collect_source_names,
     load_team_external_ids,
@@ -657,6 +667,15 @@ def crosswalk_refresh(ctx: typer.Context) -> None:
         f"team_external_ids: written, {team_external_ids.height} row(s) -> {team_external_ids_path}"
     )
 
+    players_understat = refresh_players_understat_crosswalk(seasons, data_root=data_root)
+    players_understat_path = write_players_understat_crosswalk(
+        players_understat, data_root=data_root
+    )
+    typer.echo(
+        f"players_fpl_understat: written, {players_understat.height} row(s) -> "
+        f"{players_understat_path}"
+    )
+
 
 @crosswalk_app.command("validate")
 def crosswalk_validate(ctx: typer.Context) -> None:
@@ -709,6 +728,33 @@ def crosswalk_validate(ctx: typer.Context) -> None:
     if problems:
         raise typer.Exit(exit_codes.QUALITY_GATE_FAILED)
     typer.echo(f"crosswalk validate: clean ({crosswalk.height} player code(s))")
+
+
+@crosswalk_app.command("validate-understat")
+def crosswalk_validate_understat(ctx: typer.Context) -> None:
+    """Fail if any Understat player who recorded minutes has no
+    ``players_fpl_understat`` crosswalk row (plan §7.10)."""
+    data_root = _data_root(ctx)
+    seasons = sorted(ERA_BY_SEASON)
+
+    players_understat = load_players_understat_crosswalk(data_root=data_root)
+
+    problems = False
+    for season in seasons:
+        unmapped = unmapped_understat_players_with_minutes(
+            season, players_understat, data_root=data_root
+        )
+        if unmapped:
+            problems = True
+            typer.secho(
+                f"[block] {season}: {len(unmapped)} understat player(s) with minutes have "
+                f"no players_fpl_understat mapping: {unmapped[:10]}",
+                fg=typer.colors.RED,
+            )
+
+    if problems:
+        raise typer.Exit(exit_codes.QUALITY_GATE_FAILED)
+    typer.echo(f"crosswalk validate-understat: clean ({players_understat.height} row(s))")
 
 
 @app.command()

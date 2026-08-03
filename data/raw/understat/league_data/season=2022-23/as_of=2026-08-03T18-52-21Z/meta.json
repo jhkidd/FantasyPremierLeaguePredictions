@@ -1,0 +1,19 @@
+{
+  "cohort": null,
+  "compressed_bytes": 89384,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "league_data",
+  "event": null,
+  "fetched_at": "2026-08-03T18:52:21.727739+00:00",
+  "http_status": 200,
+  "params": {
+    "league": "EPL",
+    "season": 2022
+  },
+  "raw_bytes": 534845,
+  "season": "2022-23",
+  "sha256": "0aadeaec4515c1b93fba3433c748b85b97df09f4fab66a374cad035309ba687b",
+  "source": "understat",
+  "url": "https://understat.com/getLeagueData/EPL/2022"
+}

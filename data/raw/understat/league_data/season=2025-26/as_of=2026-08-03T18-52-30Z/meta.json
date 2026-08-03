@@ -1,0 +1,19 @@
+{
+  "cohort": null,
+  "compressed_bytes": 88491,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "league_data",
+  "event": null,
+  "fetched_at": "2026-08-03T18:52:30.167701+00:00",
+  "http_status": 200,
+  "params": {
+    "league": "EPL",
+    "season": 2025
+  },
+  "raw_bytes": 529950,
+  "season": "2025-26",
+  "sha256": "d401b18a3386d8168f03727b43b1ab5dc9092e0469e77a1561136baf25151f42",
+  "source": "understat",
+  "url": "https://understat.com/getLeagueData/EPL/2025"
+}

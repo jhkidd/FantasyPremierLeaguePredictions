@@ -1,0 +1,19 @@
+{
+  "cohort": null,
+  "compressed_bytes": 90649,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "league_data",
+  "event": null,
+  "fetched_at": "2026-08-03T18:52:24.578504+00:00",
+  "http_status": 200,
+  "params": {
+    "league": "EPL",
+    "season": 2023
+  },
+  "raw_bytes": 540332,
+  "season": "2023-24",
+  "sha256": "a6438fbf4b4aa539aa8d326b541f3b5546683c5f22b714a6625ddae062ef57d8",
+  "source": "understat",
+  "url": "https://understat.com/getLeagueData/EPL/2023"
+}

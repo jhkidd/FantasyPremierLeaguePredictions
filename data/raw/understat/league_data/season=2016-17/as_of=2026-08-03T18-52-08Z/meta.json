@@ -1,0 +1,19 @@
+{
+  "cohort": null,
+  "compressed_bytes": 88334,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "league_data",
+  "event": null,
+  "fetched_at": "2026-08-03T18:52:08.344788+00:00",
+  "http_status": 200,
+  "params": {
+    "league": "EPL",
+    "season": 2016
+  },
+  "raw_bytes": 524443,
+  "season": "2016-17",
+  "sha256": "9f803c07c7a19275d770d3a845368357bf16989e8e4356e12cd2c43649ab65f3",
+  "source": "understat",
+  "url": "https://understat.com/getLeagueData/EPL/2016"
+}
