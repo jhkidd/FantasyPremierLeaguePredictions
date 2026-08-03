@@ -126,6 +126,13 @@ def _best_understat_match(fpl_name: str, candidates: pl.DataFrame) -> tuple[int,
        King``) found live during probing. Requiring the surname token to
        match keeps those genuine collisions correctly ambiguous while
        resolving names that only differ in first-name spelling or order.
+    3. An ordered-subsequence match (:func:`_is_ordered_subsequence`): every
+       token of the shorter name appears, in order, within the longer one.
+       Catches FPL's occasional full legal name against Understat's shorter
+       public one (``Bernardo Mota Veiga de Carvalho e Silva`` contains
+       ``Bernardo`` then ``Silva``, in that order, matching Understat's
+       ``Bernardo Silva``) that neither the exact nor surname-only pass
+       would resolve.
     """
     normalized_target = _normalize_name(fpl_name)
     exact = {
@@ -145,7 +152,42 @@ def _best_understat_match(fpl_name: str, candidates: pl.DataFrame) -> tuple[int,
     }
     if len({player_id for player_id, _name in surname_matches}) == 1:
         return next(iter(surname_matches))
+
+    subsequence_matches = {
+        (row["understat_player_id"], row["understat_name"])
+        for row in candidates.iter_rows(named=True)
+        if _is_ordered_subsequence(normalized_target, _normalize_name(row["understat_name"]))
+    }
+    if len({player_id for player_id, _name in subsequence_matches}) == 1:
+        return next(iter(subsequence_matches))
     return None
+
+
+def _is_ordered_subsequence(a: str, b: str) -> bool:
+    """Do the whitespace tokens of the shorter of ``a``/``b`` all appear,
+    in the same order, somewhere within the tokens of the longer one?
+
+    Catches long-form legal names FPL sometimes records in full
+    (``Bernardo Mota Veiga de Carvalho e Silva``) against Understat's
+    shorter public name (``Bernardo Silva``) - ``bernardo`` and ``silva``
+    both appear in the long name, in that order, with other tokens
+    (``mota``, ``veiga``, ...) interspersed. Symmetric so it also catches
+    the reverse shape, a short FPL name against a longer Understat one.
+    """
+    tokens_a = a.split()
+    tokens_b = b.split()
+    if not tokens_a or not tokens_b:
+        return False
+    if len(tokens_a) <= len(tokens_b):
+        shorter, longer = tokens_a, tokens_b
+    else:
+        shorter, longer = tokens_b, tokens_a
+    if len(shorter) < 2 or shorter == longer:
+        # A single-token name is too weak a subsequence to trust, and an
+        # identical pair would already have been caught by the exact pass.
+        return False
+    it = iter(longer)
+    return all(token in it for token in shorter)
 
 
 def draft_players_crosswalk(

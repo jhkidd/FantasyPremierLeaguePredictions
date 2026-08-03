@@ -1,0 +1,41 @@
+{
+  "chunk": 17,
+  "cohort": null,
+  "compressed_bytes": 70503,
+  "connector_version": "1",
+  "content_type": "ndjson",
+  "endpoint": "match_data",
+  "event": null,
+  "fetched_at": "2026-08-03T21:38:02.167264+00:00",
+  "http_status": 200,
+  "match_count": 20,
+  "params": {
+    "match_ids": [
+      18542,
+      18543,
+      18544,
+      18545,
+      18546,
+      18547,
+      18548,
+      18549,
+      18550,
+      18551,
+      18552,
+      18553,
+      18554,
+      18555,
+      18556,
+      18557,
+      18558,
+      18559,
+      18560,
+      18561
+    ]
+  },
+  "raw_bytes": 778943,
+  "season": "2022-23",
+  "sha256": "c3f190ba7e754905be655944ab911a47346c52a816897bdee5ec3f573eec5a35",
+  "source": "understat",
+  "url": "https://understat.com/getMatchData/{id}"
+}

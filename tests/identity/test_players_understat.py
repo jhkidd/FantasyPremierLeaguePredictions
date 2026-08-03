@@ -136,6 +136,36 @@ class TestDraftPlayersCrosswalk:
         assert row["understat_player_id"] == 843
         assert row["understat_name"] == "James Ward-Prowse"
 
+    def test_long_legal_name_matches_a_short_public_name_in_order(self, tmp_path: Path) -> None:
+        """FPL's full legal name ('Bernardo Mota Veiga de Carvalho e
+        Silva') should resolve against Understat's shorter public name
+        ('Bernardo Silva') via the ordered-subsequence fallback, since
+        neither the exact nor surname-only pass would catch it."""
+        _write_players_raw(
+            tmp_path,
+            SEASON,
+            body=(b"code,first_name,second_name\n620,Bernardo,Mota Veiga de Carvalho e Silva\n"),
+        )
+        _write_understat_league_data(tmp_path, SEASON, [_understat_player("999", "Bernardo Silva")])
+        draft = draft_players_crosswalk([SEASON], data_root=tmp_path)
+        row = draft.filter(pl.col("player_code") == "620").row(0, named=True)
+        assert row["understat_player_id"] == 999
+        assert row["understat_name"] == "Bernardo Silva"
+
+    def test_out_of_order_tokens_do_not_match_via_subsequence(self, tmp_path: Path) -> None:
+        """Same tokens, wrong order ('Silva Bernardo' vs 'Bernardo Silva')
+        must not be accepted - the subsequence pass requires order to
+        agree, not just presence."""
+        _write_players_raw(
+            tmp_path,
+            SEASON,
+            body=(b"code,first_name,second_name\n620,Silva,Bernardo\n"),
+        )
+        _write_understat_league_data(tmp_path, SEASON, [_understat_player("999", "Bernardo Silva")])
+        draft = draft_players_crosswalk([SEASON], data_root=tmp_path)
+        row = draft.filter(pl.col("player_code") == "620").row(0, named=True)
+        assert row["understat_player_id"] is None
+
     def test_no_ingested_season_yields_an_empty_frame(self, tmp_path: Path) -> None:
         draft = draft_players_crosswalk([SEASON], data_root=tmp_path)
         assert draft.height == 0
