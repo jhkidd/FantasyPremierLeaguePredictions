@@ -11,6 +11,7 @@ from fpl.staging.pipeline import (
     stage_footballdata_source,
     stage_fpl_source,
     stage_openfootball_source,
+    stage_understat_source,
     stage_vaastav_source,
 )
 from fpl.storage.raw_io import RawArtifact, write_raw
@@ -160,9 +161,7 @@ class TestStageClubeloSourceEndToEnd:
         assert result.written
         assert result.rows == 2
 
-        out_path = (
-            data_root / "staged" / "clubelo_ratings" / "season=2025-26" / "part.parquet"
-        )
+        out_path = data_root / "staged" / "clubelo_ratings" / "season=2025-26" / "part.parquet"
         assert out_path.exists()
 
     def test_multiple_as_of_captures_concatenate(self, tmp_path: Path) -> None:
@@ -228,6 +227,139 @@ class TestStageOpenfootballSourceEndToEnd:
         assert "no openfootball capture on disk" in result.detail
 
 
+UNDERSTAT_LEAGUE_DATA = {
+    "teams": {},
+    "players": [
+        {
+            "id": "620",
+            "player_name": "Bruno Fernandes",
+            "team_title": "Manchester United",
+            "position": "M",
+            "games": "1",
+            "time": "90",
+            "goals": "1",
+            "xG": "0.4",
+            "assists": "0",
+            "xA": "0.1",
+            "shots": "3",
+            "key_passes": "2",
+            "yellow_cards": "0",
+            "red_cards": "0",
+            "npg": "1",
+            "npxG": "0.4",
+            "xGChain": "0.5",
+            "xGBuildup": "0.2",
+        }
+    ],
+    "dates": [
+        {
+            "id": "555",
+            "isResult": True,
+            "datetime": "2025-08-16 15:00:00",
+            "h": {"title": "Manchester United"},
+            "a": {"title": "Fulham"},
+            "goals": {"h": "1", "a": "0"},
+            "xG": {"h": "0.4", "a": "0.2"},
+        }
+    ],
+}
+
+UNDERSTAT_MATCH_DATA = {
+    "rosters": {
+        "h": {
+            "3200": {
+                "player": "Bruno Fernandes",
+                "player_id": "620",
+                "team_id": "89",
+                "position": "M",
+                "time": "90",
+                "goals": "1",
+                "own_goals": "0",
+                "shots": "3",
+                "xG": "0.4",
+                "assists": "0",
+                "xA": "0.1",
+                "key_passes": "2",
+                "yellow_card": "0",
+                "red_card": "0",
+                "xGChain": "0.5",
+                "xGBuildup": "0.2",
+            }
+        },
+        "a": {},
+    },
+    "shots": {},
+}
+
+
+def _write_understat_league_data(data_root: Path, moment: datetime, season: Season) -> None:
+    import json
+
+    artifact = RawArtifact(
+        source="understat",
+        endpoint="league_data",
+        season=season,
+        url="https://understat.com/getLeagueData/EPL/2025",
+        http_status=200,
+        body=json.dumps(UNDERSTAT_LEAGUE_DATA).encode(),
+        fetched_at=moment,
+        connector_version="1",
+        content_type="json",
+    )
+    write_raw(artifact, data_root=data_root)
+
+
+def _write_understat_match_chunk(data_root: Path, moment: datetime, season: Season) -> None:
+    import json
+
+    from fpl.storage.raw_io import write_chunk
+
+    record = {"match_id": 555, "payload": UNDERSTAT_MATCH_DATA}
+    body = json.dumps(record, sort_keys=True).encode() + b"\n"
+    artifact = RawArtifact(
+        source="understat",
+        endpoint="match_data",
+        season=season,
+        url="https://understat.com/getMatchData/{id}",
+        http_status=200,
+        body=body,
+        fetched_at=moment,
+        connector_version="1",
+        content_type="ndjson",
+    )
+    write_chunk(artifact, 0, data_root=data_root)
+
+
+class TestStageUnderstatSourceEndToEnd:
+    def test_stages_players_and_fixtures_from_league_data(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        _write_understat_league_data(data_root, datetime(2025, 8, 20, tzinfo=UTC), VAASTAV_SEASON)
+
+        results = stage_understat_source(VAASTAV_SEASON, data_root=data_root)
+        by_table = {r.table: r for r in results}
+        assert by_table["understat_players_season"].written
+        assert by_table["understat_players_season"].rows == 1
+        assert by_table["understat_fixtures"].written
+        assert by_table["understat_fixtures"].rows == 1
+        assert not by_table["understat_player_match"].written
+
+    def test_stages_player_match_when_a_chunk_exists(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        _write_understat_league_data(data_root, datetime(2025, 8, 20, tzinfo=UTC), VAASTAV_SEASON)
+        _write_understat_match_chunk(data_root, datetime(2025, 8, 21, tzinfo=UTC), VAASTAV_SEASON)
+
+        results = stage_understat_source(VAASTAV_SEASON, data_root=data_root)
+        by_table = {r.table: r for r in results}
+        assert by_table["understat_player_match"].written
+        assert by_table["understat_player_match"].rows == 1
+
+    def test_no_league_data_capture_reports_not_written(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        results = stage_understat_source(VAASTAV_SEASON, data_root=data_root)
+        assert all(not r.written for r in results)
+        assert any("no understat league_data capture on disk" in (r.detail or "") for r in results)
+
+
 class TestStageFplSourceEndToEnd:
     def test_stages_players_teams_events_and_fixtures(self, tmp_path: Path) -> None:
         data_root = tmp_path / "data"
@@ -286,17 +418,13 @@ class TestStageVaastavSourceEndToEnd:
         assert result.rows == 1
         assert "excluded 1 manager-asset row" in result.detail
 
-        out_path = (
-            data_root / "staged" / "player_fixture_stats" / "season=2025-26" / "part.parquet"
-        )
+        out_path = data_root / "staged" / "player_fixture_stats" / "season=2025-26" / "part.parquet"
         assert out_path.exists()
 
     def test_rebuild_is_byte_identical(self, tmp_path: Path) -> None:
         data_root = tmp_path / "data"
         _write_merged_gw(data_root, datetime(2026, 7, 31, tzinfo=UTC))
-        out_path = (
-            data_root / "staged" / "player_fixture_stats" / "season=2025-26" / "part.parquet"
-        )
+        out_path = data_root / "staged" / "player_fixture_stats" / "season=2025-26" / "part.parquet"
 
         stage_vaastav_source(VAASTAV_SEASON, data_root=data_root)
         first = out_path.read_bytes()

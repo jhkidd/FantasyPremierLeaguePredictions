@@ -41,7 +41,6 @@ def test_version() -> None:
 @pytest.mark.parametrize(
     "argv",
     [
-        ["ingest", "understat"],
         ["features", "--as-of", "2026-08-14T11:30:00Z"],
     ],
 )
@@ -168,7 +167,7 @@ def test_malformed_season_is_rejected_before_anything_else(season: str) -> None:
 
 
 def test_valid_season_passes_validation() -> None:
-    result = runner.invoke(app, ["ingest", "understat", "--season", "2016-17"])
+    result = runner.invoke(app, ["ingest", "footballdataorg", "--season", "2016-17"])
     assert result.exit_code == exit_codes.NOT_IMPLEMENTED
 
 

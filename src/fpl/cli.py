@@ -66,17 +66,20 @@ from fpl.sources.errors import BlockedError, SchemaError, SourceError
 from fpl.sources.footballdata import FootballDataConnector
 from fpl.sources.fpl_api import FplApiConnector
 from fpl.sources.openfootball import OpenfootballConnector
+from fpl.sources.understat import UnderstatConnector
 from fpl.sources.vaastav import VaastavConnector
 from fpl.staging.pipeline import (
     stage_clubelo_source,
     stage_footballdata_source,
     stage_fpl_source,
     stage_openfootball_source,
+    stage_understat_source,
     stage_vaastav_source,
 )
 from fpl.staging.vaastav import ERA_BY_SEASON
 from fpl.storage import paths
 from fpl.storage.raw_io import write_raw
+from fpl.understat_capture import capture_league_data, capture_match_data
 
 app = typer.Typer(
     name="fpl",
@@ -184,6 +187,13 @@ def ingest(
             help="Club Elo only: date to fetch ratings for (YYYY-MM-DD). Defaults to today.",
         ),
     ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option(
+            "--limit",
+            help="Understat match_backfill only: cap the number of matches fetched this run.",
+        ),
+    ] = None,
 ) -> None:
     """Pull from a source into data/raw/."""
     parsed = _parse_season(season)
@@ -224,6 +234,22 @@ def ingest(
             body = connector.fetch_ratings(parsed_date)
             artifact = connector.artifact_for_ratings(body, parsed_date, parsed)
         result = write_raw(artifact, force=force, data_root=_data_root(ctx))
+        typer.echo(f"1 endpoint(s) pulled, {1 if result.written else 0} written")
+        return
+
+    if source == "understat":
+        if endpoint == "match_backfill":
+            with _source_failures(), UnderstatConnector() as connector:
+                outcome = capture_match_data(
+                    parsed, connector=connector, data_root=_data_root(ctx), limit=limit
+                )
+            typer.echo(
+                f"{outcome.matches} match(es) in scope, {outcome.chunks_written} chunk(s) written, "
+                f"{outcome.chunks_skipped} chunk(s) already captured"
+            )
+            return
+        with _source_failures():
+            result = capture_league_data(parsed, force=force, data_root=_data_root(ctx))
         typer.echo(f"1 endpoint(s) pulled, {1 if result.written else 0} written")
         return
 
@@ -533,7 +559,7 @@ def stage(
 ) -> None:
     """Transform data/raw/ into typed tables in data/staged/."""
     parsed = _parse_season(season)
-    if source not in {"fpl", "vaastav", "clubelo", "footballdata", "openfootball"}:
+    if source not in {"fpl", "vaastav", "clubelo", "footballdata", "openfootball", "understat"}:
         _pending(4, f"stage {source}")
 
     tables = {t.strip() for t in table.split(",")} if table else None
@@ -545,6 +571,8 @@ def stage(
         results = stage_footballdata_source(parsed, data_root=_data_root(ctx))
     elif source == "openfootball":
         results = stage_openfootball_source(parsed, data_root=_data_root(ctx))
+    elif source == "understat":
+        results = stage_understat_source(parsed, data_root=_data_root(ctx))
     else:
         try:
             results = stage_vaastav_source(parsed, data_root=_data_root(ctx))

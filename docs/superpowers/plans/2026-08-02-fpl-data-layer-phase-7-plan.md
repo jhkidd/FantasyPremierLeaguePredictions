@@ -215,6 +215,21 @@ The player crosswalk this connector needs (`crosswalk/players_fpl_understat.csv`
 
 **Tests:** recorded HTML/JSON fixtures from a real (trimmed) Understat response; a fragility smoke test that asserts the connector raises a clear `SchemaError` (not an obscure parse exception) if the page structure it depends on has changed, so a future breakage surfaces as "Understat's page changed" rather than a stack trace three layers down.
 
+**Update 2026-08-04 (implementation — the 2026-08-03 note above is now itself stale):** a live probe against `understat.com` found the site has been redesigned since that note was written — team/league pages **no longer embed any JSON in a `<script>` tag at all**. The redesigned front end fetches its data through undocumented, same-origin AJAX endpoints instead (confirmed live via `curl`, cross-checked against the third-party `understatAPI` project's source as a map of what to probe, not as a dependency):
+
+- Every request must carry the header `X-Requested-With: XMLHttpRequest` — omitting it returns a plain 404, indistinguishable from "this endpoint does not exist" until you know to check.
+- `getLeagueData/{league}/{season}` returns one season's aggregate: a season-total row per player, plus a fixture list (ids, teams, final score/xG, but no player detail).
+- `getMatchData/{match_id}` returns one fixture's per-player roster detail (minutes/goals/xG/xA/shots) — the genuine per-player-per-fixture grain the design needs.
+
+This changes the request-volume shape materially: getting per-fixture player detail needs one `getMatchData` call **per match**, not per season (~380 EPL matches/season). At the existing `understat` `SourceConfig` politeness interval (2s) that is over two hours per season, ~20 hours for a full ten-season backfill — a different cost profile than every other Tier 2 source in this phase. Confirmed with the user (2026-08-04):
+
+- **Scope: EPL only**, not the original design spec's (§18) six-league ambition — the per-match cost makes "the other five leagues cost little" no longer true.
+- **Both endpoints are captured and staged**: `getLeagueData` yields `understat_players_season` (season aggregate, feeds the player crosswalk draft and cheap xG priors) and `understat_fixtures` (final score/xG only); `getMatchData` yields `understat_player_match` (the per-fixture grain).
+- **Per-match capture is chunked and resumable**, mirroring `ownership.py`'s `write_chunk`/`iter_chunks` pattern rather than one raw partition per match (which would create ~3,800 tiny partitions over ten seasons) — implemented in `understat_capture.py`, batching `CHUNK_SIZE = 20` matches' `getMatchData` responses into one newline-delimited chunk.
+- **Code + tests written and reviewed first**; the actual multi-hour historical backfill runs afterwards as its own step, not bundled into this implementation pass.
+
+`sources/understat.py` still wraps this behind the same `Connector` shape as every other source (`VERSION`, `SOURCE`, `fetch_*`/`artifact_for_*`, `SchemaError` on an unexpected JSON shape), so this is a contained rewrite of one module's internals, not a design change visible to staging or facts.
+
 ---
 
 ## 7.12 Team crosswalk extension — `identity/team_external_ids.py`, `crosswalk/team_external_ids.csv`

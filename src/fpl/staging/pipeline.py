@@ -28,6 +28,9 @@ from fpl.staging.fpl_api import (
     stage_price_snapshots,
 )
 from fpl.staging.openfootball import stage_fixtures as stage_openfootball_fixtures
+from fpl.staging.understat import stage_fixtures as stage_understat_fixtures
+from fpl.staging.understat import stage_league_players as stage_understat_league_players
+from fpl.staging.understat import stage_match_data as stage_understat_match_data
 from fpl.staging.vaastav import stage_merged_gw
 from fpl.storage import paths
 from fpl.storage.parquet_io import write_parquet
@@ -39,6 +42,7 @@ __all__ = [
     "stage_footballdata_source",
     "stage_fpl_source",
     "stage_openfootball_source",
+    "stage_understat_source",
     "stage_vaastav_source",
 ]
 
@@ -392,4 +396,95 @@ def stage_openfootball_source(
         return [
             StageResult("openfootball_fixtures", False, 0, None, "no openfootball capture on disk")
         ]
+    return results
+
+
+def stage_understat_source(
+    season: Season,
+    *,
+    data_root: Path | None = None,
+) -> list[StageResult]:
+    """Stage Understat's season-aggregate and per-match captures for one
+    season into three tables (plan §7.10-7.11): ``understat_players_season``
+    and ``understat_fixtures`` both come from one ``getLeagueData`` capture,
+    ``understat_player_match`` comes from however many ``getMatchData``
+    chunks have been captured so far - a partial per-match backfill still
+    stages whatever chunks exist, rather than requiring the whole season's
+    sweep to finish first.
+    """
+    results: list[StageResult] = []
+
+    league_partition = paths.latest_partition(
+        "understat", "league_data", season, data_root=data_root
+    )
+    if league_partition is None:
+        return [
+            StageResult(
+                "understat_players_season",
+                False,
+                0,
+                None,
+                "no understat league_data capture on disk",
+            ),
+            StageResult(
+                "understat_fixtures", False, 0, None, "no understat league_data capture on disk"
+            ),
+        ]
+
+    body, _meta = read_raw(league_partition)
+    players_staged = stage_understat_league_players(body, season)
+    _write(
+        players_staged.frame,
+        "understat_players_season",
+        season,
+        ("player_id",),
+        data_root=data_root,
+    )
+    results.append(
+        StageResult(
+            "understat_players_season", True, players_staged.frame.height, players_staged.report
+        )
+    )
+
+    fixtures_staged = stage_understat_fixtures(body, season)
+    _write(fixtures_staged.frame, "understat_fixtures", season, ("match_id",), data_root=data_root)
+    results.append(
+        StageResult(
+            "understat_fixtures", True, fixtures_staged.frame.height, fixtures_staged.report
+        )
+    )
+
+    match_frames = []
+    report: StagingReport | None = None
+    for _index, chunk_dir in paths.iter_chunks(
+        "understat", "match_data", season, data_root=data_root
+    ):
+        chunk_body, _meta = read_raw(chunk_dir)
+        for line in chunk_body.decode("utf-8").splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            staged = stage_understat_match_data(
+                json.dumps(record["payload"]).encode("utf-8"), record["match_id"], season
+            )
+            match_frames.append(staged.frame)
+            report = staged.report
+
+    if match_frames:
+        combined = pl.concat(match_frames).unique(subset=["match_id", "player_id"], keep="last")
+        _write(
+            combined,
+            "understat_player_match",
+            season,
+            ("match_id", "player_id"),
+            data_root=data_root,
+        )
+        results.append(StageResult("understat_player_match", True, combined.height, report))
+    else:
+        results.append(
+            StageResult(
+                "understat_player_match", False, 0, None, "no understat match_data chunk on disk"
+            )
+        )
+
     return results
