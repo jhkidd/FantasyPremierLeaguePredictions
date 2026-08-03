@@ -40,6 +40,17 @@ This was corrected before any implementation began: **§18.1 now splits the sour
 
 **Still open, not yet verified live:** the exact competition codes (`FAC`/`ELC` are the commonly cited codes but web search results disagreed with each other on the EFL Cup code) and how many past seasons the free tier actually serves for these two competitions. Both must be confirmed against `GET /v4/competitions` using the stored key before the connector is written (task 3 below) — guessing a code risks silently querying the wrong competition rather than failing loudly.
 
+**Update — confirmed live 2026-08-03:** the user ran `GET /v4/competitions` with their own key and shared the England entries. The commonly-cited `ELC` is **not** the EFL Cup — it is the Championship (`id 2016, "Championship", plan TIER_ONE`). The two competitions this connector actually needs are:
+
+| Competition | Code | id | `plan` tier |
+|---|---|---|---|
+| FA Cup | `FAC` | 2055 | `TIER_TWO` |
+| Football League Cup (EFL Cup) | `FLC` | 2139 | `TIER_THREE` |
+
+`numberOfAvailableSeasons` reports 145 (FAC) and 67 (FLC) in football-data.org's own system, but that is the competition's total historical depth, not necessarily what the free tier can serve per request — free tiers on this API commonly cap how far back fixture-list requests can go regardless of a competition's total recorded history. That depth limit is still to be confirmed empirically once the connector makes its first real backfill call (folded into task 15's runner-probe verification, not a separate blocker).
+
+**Correction — confirmed live 2026-08-03, supersedes the coverage-page claim above:** the user attempted `GET /v4/competitions/FAC/matches` with their own (free-tier) key and it was rejected — the free tier does **not** include FA Cup or EFL Cup at all, despite the coverage page's earlier claim. The account's actual free-tier competition list is `PL` (Premier League), `ELC` (Championship), `CL` (Champions League), `WC` (World Cup), `EC` (European Championship) — no domestic cup of any kind. **This invalidates football-data.org as a source for FA Cup/EFL Cup fixtures under the free tier**, and with it the entire premise of splitting §18.1 the way Finding B proposed. Paused pending a decision with the user on how to proceed (drop domestic-cup congestion from scope, or find a different free source for just fixture dates/participants — no score or odds data is needed for this feature, only scheduling).
+
 ### Finding C — football-data.co.uk and openfootball formats, confirmed live
 
 - `football-data.co.uk/mmz4281/2526/E0.csv` (E0 = Premier League): `Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR,...` plus extensive opening/closing bookmaker odds columns (Bet365, Betfair, Pinnacle, market average). Team names are short forms ("Liverpool", "Newcastle", "Aston Villa") requiring the team crosswalk. One file per season; no domestic cup file exists on this site either (checked `englandm.php` directly — only league divisions are listed, confirming this site cannot be a fallback for Finding B).
@@ -51,7 +62,8 @@ This was corrected before any implementation began: **§18.1 now splits the sour
 
 | Decision | Choice | Reasoning |
 |---|---|---|
-| Cup/European fixture source | **Split**: `openfootball/champions-league` for Europe, football-data.org (credentialed) for FA Cup/EFL Cup | Finding B. The only credential in this phase, and the only one in the whole project (§13 amendment). |
+| Cup/European fixture source | **Descoped domestic cups; Europe only** — `openfootball/champions-league` for Europe, plus FPL's own already-staged fixtures for Premier League congestion | Finding B found openfootball doesn't cover domestic cups; football-data.org (the proposed fallback) was then confirmed live (2026-08-03) to not serve FA Cup/EFL Cup on the free tier either. User decision: proceed without domestic-cup congestion for now, track finding a free source as future work (`future-domestic-cup-source`), rather than block this phase on it or pay for API access. |
+| football-data.org | **Not built this phase** | Confirmed live (2026-08-03) that the free tier's competition list is `PL`, `ELC` (Championship), `CL`, `WC`, `EC` — no domestic cup of any kind, contradicting the earlier coverage-page-based Finding B claim. The config/secret scaffolding added in task 1 (`footballdataorg` `SourceConfig`, `FOOTBALL_DATA_API_KEY`) is left in place, unused, in case a future competition this account *can* access becomes useful — no connector is written against it this phase. |
 | Club Elo scheme | **HTTP only, never HTTPS** | Already locked in spec §13; reconfirmed live (Finding A). |
 | Club Elo same-day leakage | **Query the day *before* kickoff, never the fixture's own date** | Elo updates same-day after a match is played; querying the fixture's own date risks the rating already reflecting that day's result on early-kickoff days. Untested edge case, so the safer read is taken rather than assumed correct (consistent with "prefer feature-poor over leaky" from the phase 8 brainstorming). |
 | Club Elo backfill granularity | **One request per distinct fixture date** (T-1), not per fixture | A gameweek has 3–4 distinct playing dates carrying ~10 fixtures each; Club Elo's per-date endpoint returns every club's rating in one call. Requesting per-fixture would be 10x more calls for identical data. |
@@ -59,7 +71,7 @@ This was corrected before any implementation began: **§18.1 now splits the sour
 | Team crosswalk build method | **Auto-drafted via name-token matching, then human-reviewed** | ~25–30 clubs total; the same lightweight token-overlap check `identity/teams.py`/`identity/players.py` already use, not a new fuzzy-matching dependency. Draft is generated, reviewed once, then hand-maintained — never regenerated wholesale, so a reviewed correction is never silently overwritten. |
 | Player crosswalk (FPL ↔ Understat) | **Fuzzy match, hand-reviewed CSV, hard fail on unmapped-with-minutes** | Reuses the mechanism spec §6/§14 already locked in; thousands of players, no shared stable key across sources, unlike the cross-season case (Finding 3, phases 4–6). |
 | `facts/team_fixture` grain | **`(season, fixture_id, team_id)`** | Mirrors `facts/player_fixture`'s key discipline (spec §18.5). |
-| Build order | Club Elo → `openfootball` → football-data.co.uk → football-data.org → Understat | Cleanest/lowest-risk connectors first (spec §18.7); the one credentialed connector comes after the credential-free ones prove the pattern; Understat (scraping, real fragility risk) last, and it also depends on the player crosswalk. |
+| Build order | Club Elo → `openfootball` → football-data.co.uk → ~~football-data.org~~ (descoped) → Understat | Cleanest/lowest-risk connectors first (spec §18.7); Understat (scraping, real fragility risk) last, and it also depends on the player crosswalk. football-data.org dropped from this phase's build order entirely (see above). |
 | Secret handling | `FOOTBALL_DATA_API_KEY` read from the environment only, never logged, never embedded in a raw artifact's URL or metadata | Standard secret hygiene; the connector fails loudly if the variable is unset rather than silently skipping the source (mirrors `identity/players.py`'s hard-fail-on-unmapped-minutes philosophy: an absent credential should be as loud as an absent player). |
 
 ---
@@ -154,9 +166,11 @@ Staging declares only the columns the design actually uses — `Date, HomeTeam, 
 
 ---
 
-## 7.8–7.9 football-data.org (FA Cup / EFL Cup) — `sources/footballdataorg.py`, `staging/footballdataorg.py`
+## 7.8–7.9 football-data.org (FA Cup / EFL Cup) — **descoped, not built this phase**
 
-**Goal:** domestic cup fixtures, the one credentialed connector in the project.
+**Original goal:** domestic cup fixtures, the one credentialed connector in the project. **Confirmed live 2026-08-03: the free tier does not serve FA Cup or EFL Cup at all** (the account's actual free-tier competition list is `PL`, `ELC` (Championship), `CL`, `WC`, `EC` — no domestic cup of any kind), contradicting the coverage-page-based claim in Finding B. Tasks 3 and 7 are therefore dropped from this phase's build. The config/secret scaffolding from §7.1 (`footballdataorg` `SourceConfig`, `Config.football_data_api_key`) is left in place unused — harmless, and ready if a future need arises for one of the competitions this account *can* actually reach. Finding a free domestic-cup fixture source is tracked as future work (`future-domestic-cup-source`), not a blocker for the rest of this phase.
+
+The sketch below was the original design, kept for reference only — it was never implemented:
 
 ```python
 class FootballDataOrgConnector:
@@ -164,7 +178,7 @@ class FootballDataOrgConnector:
     SOURCE = "footballdataorg"
 
     FA_CUP_CODE = "FAC"        # confirmed against GET /v4/competitions (task 3), not assumed
-    EFL_CUP_CODE = "..."       # confirmed the same way — do not hardcode from a web search
+    EFL_CUP_CODE = "FLC"       # confirmed the same way — do not hardcode from a web search
 
     def __init__(self, *, fetcher=None, config=None):
         api_key = (config or Config.load()).football_data_api_key
@@ -184,13 +198,10 @@ class FootballDataOrgConnector:
         ).body
 ```
 
-Rate limiting is enforced by `SourceConfig("footballdataorg", min_request_interval=6.0, ...)` (§7.1) rather than left to reactive 429 backoff — deliberately conservative given this is the one source with a real (if generous) usage cap. A non-200, non-401 response is handled by the fetcher's existing classification (§10); a 401 specifically means the key is wrong or revoked, and is **never** retried (it falls into the generic 4xx branch already, which the fetcher does not retry — no fetcher change needed here beyond §7.1's header support).
 
-**Historical depth is unverified** (Finding B) — task 3 in the sequenced list runs `GET /v4/competitions` with the real key and records what seasons are actually available for `FAC` and the EFL Cup code before any backfill code is written against an assumption.
+Rate limiting was intended to be enforced by `SourceConfig("footballdataorg", min_request_interval=6.0, ...)` (§7.1) rather than left to reactive 429 backoff — that `SourceConfig` entry remains in `config.py`, unused, since no connector is being built against it.
 
-Staging: match date, home/away team (names, resolved via the team crosswalk downstream — never in staging itself), and competition round. No odds or scoreline detail is needed here; this connector exists purely to produce fixture *dates* for the congestion count.
-
-**Tests:** construction raises immediately when the key is absent (no network call attempted); a recorded response (once task 3 confirms the real shape) drives staging tests; the rate limiter's interval is asserted via `RateLimiter`'s existing injectable clock, same pattern as `tests/sources/test_fetcher.py`.
+**This entire design is moot** (see the descoping note above) — the free tier cannot reach `FAC` or the EFL Cup code at all, so there is no historical depth to verify and no connector to test. Kept here only as a record of what was designed, in case a future free source (or a paid upgrade, if ever justified) revives this shape.
 
 ---
 
@@ -198,7 +209,7 @@ Staging: match date, home/away team (names, resolved via the team crosswalk down
 
 **Goal:** underlying-quality stats (xG, xA, shot quality) per player-fixture, via `understatapi` — built **last** in this phase (Locked decisions), after the credential-free and credentialed-but-simple connectors have proven the pattern still holds, and after the team crosswalk exists for it to join against.
 
-This is the one connector in the phase with real fragility risk, since it scrapes rather than calling a documented API. `sources/understat.py` wraps `understatapi` behind the same `Connector` shape as everything else, so a future breakage is isolated to one module and one set of tests, never leaking into staging or facts.
+This is the one connector in the phase with real fragility risk, since it scrapes rather than calling a documented API. **Update 2026-08-03:** built with our own `HttpFetcher` against Understat's embedded per-page JSON (script-tag payloads), not the third-party `understatapi` package — the user's call, to avoid a new dependency for what is, under the hood, one HTML fetch plus a small extraction step our existing tools already handle. `sources/understat.py` still wraps this behind the same `Connector` shape as everything else, so a future breakage is isolated to one module and one set of tests, never leaking into staging or facts.
 
 The player crosswalk this connector needs (`crosswalk/players_fpl_understat.csv`) is genuinely different from the team crosswalk: thousands of players, no shared stable key, so it reuses the fuzzy-match-then-hand-review mechanism already locked in at spec §6/§14, with the same hard-fail-on-unmapped-with-minutes discipline as `identity/players.py::unmapped_players_with_minutes`.
 
@@ -211,20 +222,22 @@ The player crosswalk this connector needs (`crosswalk/players_fpl_understat.csv`
 **Goal:** one small, hand-maintained mapping from FPL's stable `team_code` (already established by `identity/teams.py` in phase 6) to each external source's own name for that club.
 
 ```
-team_code, clubelo_name, understat_name, footballdata_couk_name, footballdataorg_id
+team_code, clubelo_name, understat_name, footballdata_couk_name
 ```
 
-`footballdataorg_id` is numeric (the API's own team id), the others are the source's own name string. Only ~25–30 distinct clubs span ten seasons across four sources — the same reasoning phase 6 used to reject fuzzy matching for the FPL-internal team crosswalk applies here too, but the mechanism differs because these are genuinely *external* names with no shared key at all (unlike `team_code`, which phase 6 already made a trivial join):
+**Update 2026-08-03:** the `footballdataorg_id` column originally planned here is dropped — football-data.org is not being integrated this phase (see the descoping note in §7.8–7.9), so there is no source to key against. Re-added trivially (a new nullable column, additive only) if a domestic-cup source through that API ever materialises.
+
+Only ~25–30 distinct clubs span ten seasons across three sources — the same reasoning phase 6 used to reject fuzzy matching for the FPL-internal team crosswalk applies here too, but the mechanism differs because these are genuinely *external* names with no shared key at all (unlike `team_code`, which phase 6 already made a trivial join):
 
 1. **Draft**: `identity/team_external_ids.py::draft_team_external_ids` generates a first-pass mapping using the same name-token-overlap check `identity/players.py::_shares_a_name_token` already implements (case/accent-insensitive shared-token match — "Man Utd"/"Manchester United" share no token by literal overlap alone, so the draft step also tries a small set of known FPL-style abbreviations already implicit in `identity/teams.py`'s `canonical_name`s, e.g. stripping "United"/"City" suffixes before comparing).
 2. **Human review**: the draft is written to the same `crosswalk/team_external_ids.csv` path, then reviewed and corrected by hand — exactly the pattern already used for `crosswalk/players_fpl_understat.csv` (§7.10) and for the FPL-internal team crosswalk's `_HAND_VERIFIED_CODES` (phase 6). Unlike `crosswalk/teams.csv`, this file is **never regenerated wholesale** by `crosswalk refresh` once reviewed — refresh only *drafts new rows for codes not yet present*, never overwrites an existing row, so a hand correction is never silently clobbered by a re-run.
-3. **Validate**: `fpl crosswalk validate` extended to check every `team_code` referenced by a staged Tier 2 table resolves to a row here — the same "unmapped-with-activity is a hard fail" discipline as the player crosswalk, adapted to teams: any club appearing in a staged Elo/openfootball/footballdata/footballdataorg table with no crosswalk row fails the build.
+3. **Validate**: `fpl crosswalk validate` extended to check every `team_code` referenced by a staged Tier 2 table resolves to a row here — the same "unmapped-with-activity is a hard fail" discipline as the player crosswalk, adapted to teams: any club appearing in a staged Elo/openfootball/footballdata table with no crosswalk row fails the build.
 
 **Tests:** the draft step correctly proposes matches for the ~10 known short-form/full-name pairs surfaced during probing (`Man City`↔`Manchester City`, `Spurs`↔`Tottenham`, `Newcastle`↔`Newcastle United`); a `crosswalk refresh` run twice never alters an already-reviewed row; an unmapped club with Tier 2 data present is a hard validation failure.
 
 ## 7.13 `facts/team_fixture` — `src/fpl/facts/team_fixture.py`
 
-**Goal:** the phase's one new facts table, at grain `(season, fixture_id, team_id)`, assembled by joining the four staged Tier 2 tables through the team crosswalk and FPL's own `fixtures` staged table (mirroring `build_player_fixture_facts`'s shape, spec §18.5):
+**Goal:** the phase's one new facts table, at grain `(season, fixture_id, team_id)`, assembled by joining the staged Tier 2 tables through the team crosswalk and FPL's own `fixtures` staged table (mirroring `build_player_fixture_facts`'s shape, spec §18.5):
 
 ```python
 @dataclass(frozen=True)
@@ -237,38 +250,36 @@ def build_team_fixture_facts(season: Season, *, data_root: Path | None = None) -
 def write_team_fixture_facts(season: Season, *, data_root: Path | None = None) -> TeamFixtureFactsResult: ...
 ```
 
-Columns (spec §18.5, unchanged by this plan):
+Columns (spec §18.5, updated 2026-08-03 — see below):
 
 - `elo_rating`, `opponent_elo_rating` — Club Elo, T-1 lookup (§7.2).
-- `cup_fixture_count_prior_N_days` — a trailing-window count combining `openfootball`'s European schedules and football-data.org's FA Cup/EFL Cup schedules, strictly before this fixture's kickoff. `N` is left as a small fixed set (7, 14, 28 days) rather than one value, since phase 8's later lasso-style predictor screening (a decision already recorded from the earlier brainstorming) is exactly the mechanism that will tell us which window matters — this phase's job is to make the windows available, not to pick one.
+- `fixture_count_prior_N_days` — **renamed from `cup_fixture_count_prior_N_days`, domestic cups dropped from its inputs.** A trailing-window count combining FPL's own already-staged Premier League fixtures with `openfootball`'s European schedules, strictly before this fixture's kickoff. FA Cup/EFL Cup fixtures are not counted (no free source currently supplies them — tracked as `future-domestic-cup-source`); this undercounts true fixture congestion for clubs deep in a domestic cup run, which must not be forgotten when this column is consumed downstream. `N` is left as a small fixed set (7, 14, 28 days) rather than one value, since phase 8's later lasso-style predictor screening (a decision already recorded from the earlier brainstorming) is exactly the mechanism that will tell us which window matters — this phase's job is to make the windows available, not to pick one.
 - `odds_implied_win_prob`, `odds_implied_draw_prob`, `odds_implied_loss_prob` — football-data.co.uk, overround-normalised (§7.6).
 
 This table is silver: no rolling windows beyond the small fixed set above (which describe what happened, not an as-of feature), no point-in-time construction, no modelling. Phase 8 reads it exactly as it will read `facts/player_fixture`.
 
-**Tests:** mirroring `tests/facts/test_player_fixture.py` — a golden case built from recorded fixtures across all four Tier 2 staged tables plus a real `fixtures` snapshot, a key-uniqueness gate (`unique_key(["season", "fixture_id", "team_id"])`, reusing `quality/gates.py` directly), and a case where one Tier 2 source has no data for a given fixture (e.g. a club with no European involvement that season) — confirming the row still exists with nulls in only that source's columns, never a dropped row.
+**Tests:** mirroring `tests/facts/test_player_fixture.py` — a golden case built from recorded fixtures across the Tier 2 staged tables plus a real `fixtures` snapshot, a key-uniqueness gate (`unique_key(["season", "fixture_id", "team_id"])`, reusing `quality/gates.py` directly), and a case where one Tier 2 source has no data for a given fixture (e.g. a club with no European involvement that season) — confirming the row still exists with nulls in only that source's columns, never a dropped row.
 
 ---
 
 ## 7.14 CLI additions
 
 ```
-fpl stage clubelo|openfootball|footballdata|footballdataorg|understat --season …
+fpl stage clubelo|openfootball|footballdata|understat --season …
 fpl facts team_fixture --season …
 fpl check --layer facts --table team_fixture [--season …]
 fpl crosswalk validate      # extended to cover team_external_ids and players_fpl_understat
 fpl crosswalk refresh       # extended to draft new team_external_ids rows (never overwrite reviewed ones)
 ```
 
-`fpl stage <source>` already dispatches on a source name (spec §8); this phase adds five new names to the same dispatch table, no new subcommand shape needed. `fpl facts` gains a second table argument (`player_fixture` was implicit/default before; `team_fixture` makes the choice explicit — a small, backwards-compatible CLI change).
+`fpl stage <source>` already dispatches on a source name (spec §8); this phase adds four new names to the same dispatch table (`footballdataorg` dropped — not built this phase), no new subcommand shape needed. `fpl facts` gains a second table argument (`player_fixture` was implicit/default before; `team_fixture` makes the choice explicit — a small, backwards-compatible CLI change).
 
 ## 7.15 Phase 7 exit criteria
 
-- All five Tier 2 connectors (`clubelo`, `openfootball`, `footballdata`, `footballdataorg`, `understat`) staged for at least the current season, with recorded-fixture tests passing offline.
+- Four Tier 2 connectors (`clubelo`, `openfootball`, `footballdata`, `understat`) staged for at least the current season, with recorded-fixture tests passing offline. (`footballdataorg` descoped — see §7.8–7.9.)
 - `crosswalk/team_external_ids.csv` and `crosswalk/players_fpl_understat.csv` committed, human-reviewed, and validating under `fpl crosswalk validate`.
-- `facts/team_fixture` written for at least the current season, key-unique, with the leakage-relevant columns (`elo_rating`, `cup_fixture_count_prior_N_days`) never referencing same-day or future information.
+- `facts/team_fixture` written for at least the current season, key-unique, with the leakage-relevant columns (`elo_rating`, `fixture_count_prior_N_days`) never referencing same-day or future information.
 - Club Elo connectivity independently re-verified from an actual GitHub Actions runner (Finding A), not inferred from the sandbox result.
-- football-data.org's actual competition codes and historical season depth for FA Cup/EFL Cup confirmed live (Finding B), and the connector built against the confirmed shape, not the initially-assumed one.
-- `FOOTBALL_DATA_API_KEY` absence produces an immediate, clear construction-time failure — never a silent skip or an opaque 401 three retries in.
 
 ---
 
@@ -285,9 +296,8 @@ Existing conventions hold unchanged: no network in CI, recorded/trimmed fixtures
 | # | Risk | Mitigation |
 |---|---|---|
 | **R1** | Club Elo connectivity from a real GitHub Actions runner is unverified — the sandbox's own 502 vs. `web_fetch`'s success (Finding A) proves nothing about the runner. | A throwaway workflow probe, identical in spirit to spec §13's original FPL-API probe, run before any Club Elo code is trusted in production. If it fails, Club Elo becomes a manual-backfill-only source rather than a scheduled one. |
-| **R2** | football-data.org's competition codes/season depth are still assumed, not confirmed (Finding B). | Task 3 confirms both against the live API before the connector is written against a guess. |
-| **R3** | football-data.org's 10 req/min limit is tighter than every other source in this project. | A dedicated `SourceConfig` interval (6.0s) enforces it proactively rather than relying on 429 retries; usage is one or two requests per gameweek, comfortably inside the limit even so. |
-| **R4** | `FOOTBALL_DATA_API_KEY` could be rotated, revoked, or expire without notice, silently breaking only the cup-congestion feature while everything else keeps working. | Construction-time check (fails if unset) plus a distinct, loud error path for a 401 at request time — never conflated with a transient failure that retries and eventually gives up quietly. |
+| **R2** | *(Resolved 2026-08-03, no longer a risk.)* football-data.org's competition codes/season depth were assumed, not confirmed (Finding B). | Task 3 confirmed live that the free tier has no domestic-cup access at all — see the descoping note in §7.8–7.9. The connector is not being built this phase, so the original guess is moot rather than corrected. |
+| **R3** | *(Moot — no connector built.)* football-data.org's 10 req/min limit is tighter than every other source in this project. | N/A. Left here as a record for if a future paid tier or free source revives this design. |
 | R5 | Understat's page structure changes, breaking the scrape. | Isolated to `sources/understat.py`; a `SchemaError` names the failure clearly. Built last in this phase specifically so its instability does not block the other four sources. |
 | R6 | `openfootball/champions-league`'s historical depth is shallower than ten seasons (unconfirmed — Finding C). | The season-directory-absent path (mirroring `vaastav`) fails loudly and requires a person to classify the gap, rather than silently producing zero-congestion rows that look like "no European fixtures" when the real answer is "no data". |
 | R7 | The team crosswalk draft step mismatches a club (e.g. two clubs sharing a token, or a club renamed mid-decade). | Human review before commit, same as phase 6's `_HAND_VERIFIED_CODES` precedent; `fpl crosswalk validate`'s hard fail on any unmapped-but-active club catches anything the draft missed entirely. |
@@ -295,7 +305,7 @@ Existing conventions hold unchanged: no network in CI, recorded/trimmed fixtures
 
 ### Deliberately out of scope
 
-The features/gold library (phase 8, decisions parked in the session workspace). The chip-timing model. `fpl crosswalk refresh` regenerating a *reviewed* team or player crosswalk row (only ever adds new, never overwrites). Predicted lineups. Any source requiring a credential beyond the one football-data.org exception. Multi-GW horizon modelling. Any fitted model of any kind.
+The features/gold library (phase 8, decisions parked in the session workspace). The chip-timing model. `fpl crosswalk refresh` regenerating a *reviewed* team or player crosswalk row (only ever adds new, never overwrites). Predicted lineups. **Domestic cup (FA Cup/EFL Cup) fixture congestion** — descoped 2026-08-03 once the free tier of football-data.org (the only source that was going to supply it) was confirmed live to have no domestic-cup access at all; tracked separately as `future-domestic-cup-source` for whenever a free alternative is found. Multi-GW horizon modelling. Any fitted model of any kind.
 
 ---
 
@@ -305,18 +315,18 @@ The features/gold library (phase 8, decisions parked in the session workspace). 
 |---|---|---|
 | 1 | `config.py` — `openfootball`/`footballdataorg` `SourceConfig` entries, `football_data_api_key` field | — |
 | 2 | `sources/fetcher.py` — optional per-request `headers` param | — |
-| 3 | **Confirm football-data.org competition codes + season depth via `GET /v4/competitions`** | 1 |
+| 3 | **Confirm football-data.org competition codes + season depth via `GET /v4/competitions`** — done; result was descoping, not a corrected build (see §7.8–7.9) | 1 |
 | 4 | `sources/clubelo.py` + `staging/clubelo.py`, T-1 date logic | 1 |
 | 5 | `sources/openfootball.py` + `staging/openfootball_parser.py` + `staging/openfootball.py` | 1 |
 | 6 | `sources/footballdata.py` + `staging/footballdata.py` | 1 |
-| 7 | `sources/footballdataorg.py` + `staging/footballdataorg.py` | 1, 2, 3 |
-| 8 | `identity/team_external_ids.py` + `crosswalk/team_external_ids.csv` (draft, then reviewed) | 4, 5, 6, 7 |
+| ~~7~~ | ~~`sources/footballdataorg.py` + `staging/footballdataorg.py`~~ — **descoped, not built** | 1, 2, 3 |
+| 8 | `identity/team_external_ids.py` + `crosswalk/team_external_ids.csv` (draft, then reviewed) | 4, 5, 6 |
 | 9 | `crosswalk validate`/`refresh` extended for team_external_ids | 8 |
 | 10 | `identity/players_understat.py` + `crosswalk/players_fpl_understat.csv` (draft, then reviewed) | — |
 | 11 | `sources/understat.py` + `staging/understat.py` | 10 |
 | 12 | `facts/team_fixture.py` | 8, 9, 11 |
 | 13 | **Key-uniqueness + no-leakage checks on `facts/team_fixture`** | 12 |
-| 14 | `fpl stage`/`fpl facts`/`fpl check` CLI wiring | 4–7, 12 |
+| 14 | `fpl stage`/`fpl facts`/`fpl check` CLI wiring | 4–6, 12 |
 | 15 | **Club Elo runner-connectivity probe (Finding A/R1)** | 4 |
 | 16 | Record findings (confirmed competition codes, runner probe result, confirmed `openfootball` historical depth) back into spec §18 | 3, 15 |
 
