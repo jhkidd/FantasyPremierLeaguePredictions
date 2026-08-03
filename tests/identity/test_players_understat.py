@@ -20,10 +20,7 @@ from fpl.storage.raw_io import RawArtifact, write_raw
 SEASON = Season(2025)
 
 PLAYERS_RAW_CSV = (
-    b"code,first_name,second_name\n"
-    b"620,Bruno,Fernandes\n"
-    b"999,Marcus,Rashford\n"
-    b"111,Joshua,King\n"
+    b"code,first_name,second_name\n620,Bruno,Fernandes\n999,Marcus,Rashford\n111,Joshua,King\n"
 )
 
 
@@ -114,6 +111,30 @@ class TestDraftPlayersCrosswalk:
         draft = draft_players_crosswalk([SEASON], data_root=tmp_path)
         row = draft.filter(pl.col("player_code") == "111").row(0, named=True)
         assert row["understat_player_id"] is None
+
+    def test_shared_first_name_alone_is_not_a_false_collision(self, tmp_path: Path) -> None:
+        """A live-probe regression: 'James Ward-Prowse' sharing the token
+        'James' with several unrelated Understat players ('James Milner',
+        'James Tomkins', ...) must not block the match - only a shared
+        surname counts as a genuine collision."""
+        _write_players_raw(
+            tmp_path,
+            SEASON,
+            body=(b"code,first_name,second_name\n620,James,Ward-Prowse\n"),
+        )
+        _write_understat_league_data(
+            tmp_path,
+            SEASON,
+            [
+                _understat_player("843", "James Ward-Prowse"),
+                _understat_player("999", "James Milner"),
+                _understat_player("998", "James Tomkins"),
+            ],
+        )
+        draft = draft_players_crosswalk([SEASON], data_root=tmp_path)
+        row = draft.filter(pl.col("player_code") == "620").row(0, named=True)
+        assert row["understat_player_id"] == 843
+        assert row["understat_name"] == "James Ward-Prowse"
 
     def test_no_ingested_season_yields_an_empty_frame(self, tmp_path: Path) -> None:
         draft = draft_players_crosswalk([SEASON], data_root=tmp_path)

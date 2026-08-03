@@ -16,13 +16,14 @@ season, exactly like the team crosswalk's one-row-per-club shape.
 The mechanism mirrors ``team_external_ids.py``:
 
 1. :func:`draft_players_crosswalk` proposes a match for every FPL
-   ``player_code`` using the token-overlap check already shared with
-   ``identity/players.py`` (:func:`fpl.identity.players._shares_a_name_token`).
-   A draft match is only ever proposed when *exactly one* Understat player
-   in that season shares a name token - the same two genuine collisions
-   found during probing (two different "Gabriel"s, two different "Joshua
-   King"s) each have more than one candidate and are correctly left
-   ``None`` for a human to resolve, rather than guessed at.
+   ``player_code``, trying an exact normalized-name match first and
+   falling back to a surname-only match (see :func:`_best_understat_match`
+   for why a first-name-or-any-token overlap is too loose across sources).
+   A draft match is only ever proposed when exactly one Understat player
+   qualifies at whichever pass succeeds - the two genuine collisions found
+   during probing (two different "Gabriel"s, two different "Joshua
+   King"s) still have more than one same-surname candidate and are
+   correctly left ``None`` for a human to resolve, rather than guessed at.
 2. A human reviews and corrects the draft, committed to
    ``crosswalk/players_fpl_understat.csv``.
 3. :func:`refresh_players_crosswalk` never overwrites an already-reviewed
@@ -41,7 +42,6 @@ from pathlib import Path
 import polars as pl
 
 from fpl.config import Season
-from fpl.identity.players import _shares_a_name_token
 from fpl.staging.base import decode_csv
 from fpl.storage import paths
 from fpl.storage.raw_io import read_raw
@@ -94,19 +94,58 @@ def _understat_players(season: Season, *, data_root: Path | None) -> pl.DataFram
     )
 
 
+def _normalize_name(name: str) -> str:
+    """Fold accents, case, and hyphens away for a name-equality comparison
+    (``Bešić`` == ``Besic``; ``Ward-Prowse`` tokenizes as ``ward prowse``)."""
+    import unicodedata
+
+    folded = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
+    return " ".join(folded.replace("-", " ").split())
+
+
 def _best_understat_match(fpl_name: str, candidates: pl.DataFrame) -> tuple[int, str] | None:
-    """The one Understat player whose name shares a token with ``fpl_name`` -
-    ``None`` if zero or more than one do, both left for a human to fill in
-    rather than guessed at (mirrors ``team_external_ids._best_match``)."""
-    matches = {
+    """The Understat player who is ``fpl_name`` - ``None`` if that can't be
+    said with confidence, left for a human to fill in rather than guessed at
+    (mirrors ``team_external_ids._best_match``).
+
+    Tried in two passes, each requiring a *unique* result before accepting
+    it:
+
+    1. Exact match on the full normalized name. This alone would still miss
+       genuine spelling variants (``Muhamed Besic`` / ``Muhamed Bešić``,
+       ``Matthew James`` / ``Matty James``), so:
+    2. A surname-only match: the same last name-token, when only one
+       Understat candidate shares it. Plain first-name-or-any-token overlap
+       (as ``identity/players.py``'s cross-season check uses, where a reused
+       ``player_code`` would be the only cause of a false positive) is too
+       loose across sources - shared first names are common enough
+       (``James Ward-Prowse`` sharing ``James`` with ``James Milner``,
+       ``James Tomkins``, ... ; ``Lucas Digne`` sharing ``Lucas`` with
+       ``Lucas Moura``, ``Lucas Paquetá``, ...) that it produced false
+       ambiguity, not just the genuine collisions (``Gabriel``, ``Joshua
+       King``) found live during probing. Requiring the surname token to
+       match keeps those genuine collisions correctly ambiguous while
+       resolving names that only differ in first-name spelling or order.
+    """
+    normalized_target = _normalize_name(fpl_name)
+    exact = {
         (row["understat_player_id"], row["understat_name"])
         for row in candidates.iter_rows(named=True)
-        if _shares_a_name_token(fpl_name, row["understat_name"])
+        if _normalize_name(row["understat_name"]) == normalized_target
     }
-    unique_ids = {player_id for player_id, _name in matches}
-    if len(unique_ids) != 1:
-        return None
-    return next(iter(matches))
+    if len({player_id for player_id, _name in exact}) == 1:
+        return next(iter(exact))
+
+    target_surname = normalized_target.split()[-1] if normalized_target else ""
+    surname_matches = {
+        (row["understat_player_id"], row["understat_name"])
+        for row in candidates.iter_rows(named=True)
+        if _normalize_name(row["understat_name"]).split()[-1:] == [target_surname]
+        if target_surname
+    }
+    if len({player_id for player_id, _name in surname_matches}) == 1:
+        return next(iter(surname_matches))
+    return None
 
 
 def draft_players_crosswalk(
