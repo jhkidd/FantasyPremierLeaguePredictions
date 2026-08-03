@@ -35,6 +35,13 @@ from fpl.identity.players import (
     validate_name_variants,
     write_players_crosswalk,
 )
+from fpl.identity.team_external_ids import (
+    collect_source_names,
+    load_team_external_ids,
+    refresh_team_external_ids,
+    unmapped_source_names,
+    write_team_external_ids,
+)
 from fpl.identity.teams import build_teams_crosswalk, write_teams_crosswalk
 from fpl.ingest import ingest_fpl
 from fpl.ownership import (
@@ -538,11 +545,15 @@ def facts(
 
 @crosswalk_app.command("refresh")
 def crosswalk_refresh(ctx: typer.Context) -> None:
-    """Rebuild both crosswalks from ingested raw data and write them.
+    """Rebuild both FPL-internal crosswalks from ingested raw data and write
+    them, then draft any new ``team_external_ids`` rows.
 
-    ``refresh`` (rather than ``validate`` alone) is needed here, unlike the
-    cross-source crosswalk deferred to phase 7, because there is nothing
-    committed yet for a person to review a diff against on the first run."""
+    ``refresh`` (rather than ``validate`` alone) is needed for the two
+    FPL-internal crosswalks because there is nothing committed yet for a
+    person to review a diff against on the first run. ``team_external_ids``
+    is different: it is a genuine draft-then-hand-review crosswalk (plan
+    §7.12), so this command only ever *adds* a row for a ``team_code`` not
+    yet present - an already-reviewed row is never touched."""
     data_root = _data_root(ctx)
     seasons = sorted(ERA_BY_SEASON)
 
@@ -554,10 +565,25 @@ def crosswalk_refresh(ctx: typer.Context) -> None:
     teams_path = write_teams_crosswalk(teams_crosswalk, data_root=data_root)
     typer.echo(f"teams: written, {teams_crosswalk.height} row(s) -> {teams_path}")
 
+    source_names = collect_source_names(seasons, data_root=data_root)
+    team_external_ids = refresh_team_external_ids(
+        teams_crosswalk,
+        clubelo_names=source_names["clubelo_name"],
+        understat_names=source_names["understat_name"],
+        footballdata_names=source_names["footballdata_couk_name"],
+        openfootball_names=source_names["openfootball_name"],
+        data_root=data_root,
+    )
+    team_external_ids_path = write_team_external_ids(team_external_ids, data_root=data_root)
+    typer.echo(
+        f"team_external_ids: written, {team_external_ids.height} row(s) -> {team_external_ids_path}"
+    )
+
 
 @crosswalk_app.command("validate")
 def crosswalk_validate(ctx: typer.Context) -> None:
-    """Fail if any player with minutes is unmapped, or a code looks reused."""
+    """Fail if any player with minutes is unmapped, a code looks reused, or a
+    Tier 2 source published a club with no ``team_external_ids`` row."""
     data_root = _data_root(ctx)
     seasons = sorted(ERA_BY_SEASON)
 
@@ -583,6 +609,22 @@ def crosswalk_validate(ctx: typer.Context) -> None:
             typer.secho(
                 f"[block] {season}: {len(unmapped)} player(s) with minutes have no "
                 f"player_code mapping: {unmapped[:10]}",
+                fg=typer.colors.RED,
+            )
+
+    team_external_ids = load_team_external_ids(data_root=data_root)
+    source_names = collect_source_names(seasons, data_root=data_root)
+    for column, key in (
+        ("clubelo_name", "clubelo_name"),
+        ("footballdata_couk_name", "footballdata_couk_name"),
+        ("openfootball_name", "openfootball_name"),
+    ):
+        unmapped_names = unmapped_source_names(source_names[key], team_external_ids, column)
+        if unmapped_names:
+            problems = True
+            typer.secho(
+                f"[block] team_external_ids.{column}: {len(unmapped_names)} name(s) with "
+                f"Tier 2 activity have no crosswalk row: {unmapped_names[:10]}",
                 fg=typer.colors.RED,
             )
 

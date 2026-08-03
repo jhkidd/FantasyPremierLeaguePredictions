@@ -94,6 +94,7 @@ def test_crosswalk_refresh_with_no_ingested_data_writes_empty_crosswalks(
     assert result.exit_code == exit_codes.SUCCESS
     assert (isolated_data_root / "crosswalk" / "players_fpl.csv").is_file()
     assert (isolated_data_root / "crosswalk" / "teams.csv").is_file()
+    assert (isolated_data_root / "crosswalk" / "team_external_ids.csv").is_file()
 
 
 def test_crosswalk_validate_with_no_ingested_data_fails_the_gate(
