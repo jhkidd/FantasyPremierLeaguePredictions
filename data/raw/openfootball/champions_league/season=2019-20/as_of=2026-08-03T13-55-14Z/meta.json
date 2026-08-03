@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 1813,
+  "connector_version": "1",
+  "content_type": "txt",
+  "endpoint": "champions_league",
+  "event": null,
+  "fetched_at": "2026-08-03T13:55:14.064000+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 9967,
+  "season": "2019-20",
+  "sha256": "e0f6d8990b3110108193eecdcd698dfa48b6f324ffa7532cdc11aea19f7ee419",
+  "source": "openfootball",
+  "url": "https://github.com/openfootball/champions-league/archive/refs/heads/master.tar.gz#2019-20/cl.txt"
+}

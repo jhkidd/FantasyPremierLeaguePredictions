@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 54119,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "matches_and_odds",
+  "event": null,
+  "fetched_at": "2026-08-03T13:54:51.461619+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 197110,
+  "season": "2024-25",
+  "sha256": "d0c8ce4a96d886cf60cf101f570f4a3893844226f91c7bd769eb568c49edbfa4",
+  "source": "footballdata",
+  "url": "https://www.football-data.co.uk/mmz4281/2425/E0.csv"
+}

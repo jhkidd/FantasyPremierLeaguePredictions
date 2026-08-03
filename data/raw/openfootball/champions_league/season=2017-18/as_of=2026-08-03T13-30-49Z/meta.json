@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 1773,
+  "connector_version": "1",
+  "content_type": "txt",
+  "endpoint": "champions_league",
+  "event": null,
+  "fetched_at": "2026-08-03T13:30:49.161452+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 10389,
+  "season": "2017-18",
+  "sha256": "5f022938be481f3f9fa88fa7580033aab631a9dd321170d2e7b7ee558c92e468",
+  "source": "openfootball",
+  "url": "https://github.com/openfootball/champions-league/archive/refs/heads/master.tar.gz#2017-18/cl.txt"
+}

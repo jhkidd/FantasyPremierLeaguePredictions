@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 1667,
+  "connector_version": "1",
+  "content_type": "txt",
+  "endpoint": "europa_league_qualifying",
+  "event": null,
+  "fetched_at": "2026-08-03T11:06:29.329857+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 6474,
+  "season": "2025-26",
+  "sha256": "91f6d5440da9d100322be0de8ad95df8d873040abba4af8986147d9da55e5e32",
+  "source": "openfootball",
+  "url": "https://github.com/openfootball/champions-league/archive/refs/heads/master.tar.gz#2025-26/elq.txt"
+}

@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 29083,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "matches_and_odds",
+  "event": null,
+  "fetched_at": "2026-08-03T13:54:36.421757+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 99990,
+  "season": "2016-17",
+  "sha256": "9625a7652b5f98fbd3e2e4d378c851fc246693f3343e34a72428d5b6e864d3e0",
+  "source": "footballdata",
+  "url": "https://www.football-data.co.uk/mmz4281/1617/E0.csv"
+}

@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 47189,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "matches_and_odds",
+  "event": null,
+  "fetched_at": "2026-08-03T13:54:40.582272+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 175475,
+  "season": "2019-20",
+  "sha256": "100037618b94f94057400bb02bf6bac4ef74ddaa58cde4b38370839c39caee61",
+  "source": "footballdata",
+  "url": "https://www.football-data.co.uk/mmz4281/1920/E0.csv"
+}

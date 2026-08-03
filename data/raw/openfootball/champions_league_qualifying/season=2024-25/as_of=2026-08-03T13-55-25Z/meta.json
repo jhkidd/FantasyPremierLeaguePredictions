@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 1846,
+  "connector_version": "1",
+  "content_type": "txt",
+  "endpoint": "champions_league_qualifying",
+  "event": null,
+  "fetched_at": "2026-08-03T13:55:25.329778+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 7157,
+  "season": "2024-25",
+  "sha256": "a39cc3ed20233ce2fcc490d4feda4a67dacf0d8080c83f4078ab34eca4632c25",
+  "source": "openfootball",
+  "url": "https://github.com/openfootball/champions-league/archive/refs/heads/master.tar.gz#2024-25/clq.txt"
+}

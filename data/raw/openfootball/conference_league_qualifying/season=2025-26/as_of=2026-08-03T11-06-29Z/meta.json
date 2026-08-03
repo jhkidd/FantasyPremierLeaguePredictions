@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 4326,
+  "connector_version": "1",
+  "content_type": "txt",
+  "endpoint": "conference_league_qualifying",
+  "event": null,
+  "fetched_at": "2026-08-03T11:06:29.329857+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 19716,
+  "season": "2025-26",
+  "sha256": "417d8fd7f0b79771f4293476a3815a0db6cfd3391e457b46e0fa2ddea81965c4",
+  "source": "openfootball",
+  "url": "https://github.com/openfootball/champions-league/archive/refs/heads/master.tar.gz#2025-26/confq.txt"
+}

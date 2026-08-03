@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 29333,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "matches_and_odds",
+  "event": null,
+  "fetched_at": "2026-08-03T13:54:37.881335+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 100734,
+  "season": "2017-18",
+  "sha256": "4f3389365ef3f7ac966764ed8ba67cf3b79f5aebed18dd224099c4b2c98bc67b",
+  "source": "footballdata",
+  "url": "https://www.football-data.co.uk/mmz4281/1718/E0.csv"
+}
