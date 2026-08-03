@@ -4,7 +4,7 @@ player_code,fpl_name,understat_player_id,understat_name
 100037973,Pep Guardiola,,
 100038215,Eddie Howe,,
 100040854,Vítor Manuel de Oliveira Lopes Pereira,,
-100041800,Marco Alexandre Saraiva da Silva,,
+100041800,Marco Alexandre Saraiva da Silva,7312,Xande Silva
 100041808,Nuno Herlander Simões Espírito Santo,,
 100041880,Ange Postecoglou,,
 100042830,Thomas Frank,,
@@ -20,7 +20,7 @@ player_code,fpl_name,understat_player_id,understat_name
 100053636,Ruben Filipe Marques Diogo Amorim,,
 100053901,Fabian Hürzeler,,
 100059,Alberto Moreno,608,Alberto Moreno
-100180,Danilo Luiz da Silva,,
+100180,Danilo Luiz da Silva,7312,Xande Silva
 100412,André Carrillo,6230,André Carrillo
 100649,Bernard Anício Caldeira Duarte,,
 101061,Philip Heise,,
@@ -126,7 +126,7 @@ player_code,fpl_name,understat_player_id,understat_name
 112516,Isaiah Brown,4481,Isaiah Brown
 112520,Alex Palmer,705,Kasey Palmer
 11334,Petr Cech,491,Petr Cech
-11352,Bruno Saltor Grau,,
+11352,Bruno Saltor Grau,6046,Bruno
 113534,Matt Macey,,
 113564,Sam Byram,902,Sam Byram
 113688,Oumar Niasse,599,Oumar Niasse
@@ -167,7 +167,7 @@ player_code,fpl_name,understat_player_id,understat_name
 12002,Stewart Downing,1712,Stewart Downing
 120202,Wout Weghorst,7052,Wout Weghorst
 120250,André Filipe Tavares Gomes,2383,André Gomes
-120447,Bradley Smith,,
+120447,Bradley Smith,477,Brad Smith
 120721,Kevin Mbabu,983,Kevin Mbabu
 12086,Boaz Myhill,820,Boaz Myhill
 121145,João Pedro Cavaco Cancelo,2379,João Cancelo
@@ -240,7 +240,7 @@ player_code,fpl_name,understat_player_id,understat_name
 145212,Clinton N'Jie,,
 145235,Jose Angel Esmoris Tasende,,
 146426,Oluwasemilogo Adesewo Ibidapo Ajayi,4490,Semi Ajayi
-146610,Jack O'Connell,,
+146610,Jack O'Connell,7705,Jack O&#039;Connell
 14664,Gnegneri Yaya Touré,878,Yaya Touré
 146941,Aymeric Laporte,2498,Aymeric Laporte
 147303,Laurent Depoitre,6038,Laurent Depoitre
@@ -388,7 +388,7 @@ player_code,fpl_name,understat_player_id,understat_name
 167191,Marcus Myers-Harness,12753,Marcus Harness
 167199,Thomas Partey,2328,Thomas Partey
 167473,José Heriberto Izquierdo Mena,6231,José Izquierdo
-167512,Luke O'Nien,,
+167512,Luke O'Nien,14099,Luke O&#039;Nien
 167522,Jordan Hugill,6526,Jordan Hugill
 167541,Jack Payne,,
 167767,Robert Kenedy Nunes do Nascimento,,
@@ -512,7 +512,7 @@ player_code,fpl_name,understat_player_id,understat_name
 178301,Ollie Watkins,8865,Ollie Watkins
 178304,Lys Mousset,1748,Lys Mousset
 17878,Cesc Fàbregas,686,Cesc Fàbregas
-178867,Antonio Martinez Lopez,,
+178867,Antonio Martinez Lopez,13200,Fernando López
 178871,Aleix García Serrano,1055,Aleix García
 178876,Jesús Vallejo Lázaro,6352,Valentino Lazaro
 179018,Miguel Almirón,7420,Miguel Almirón
@@ -672,7 +672,7 @@ player_code,fpl_name,understat_player_id,understat_name
 199796,Matthew Cash,8864,Matthew Cash
 199798,Ezri Konsa Ngoyo,7726,Ezri Konsa Ngoyo
 199806,Dion Henry,,
-200088,Daniel N'Lundulu,,
+200088,Daniel N'Lundulu,7983,Daniel N&#039;Lundulu
 200089,Joseph Willock,6630,Joe Willock
 20037,Marc Pugh,466,Marc Pugh
 200370,Matt Butcher,,
@@ -788,7 +788,7 @@ player_code,fpl_name,understat_player_id,understat_name
 209418,Tobi Omole,,
 209419,Max Melbourne,,
 209420,Joy Mukena,,
-209925,Alexandre Nascimento Costa Silva,,
+209925,Alexandre Nascimento Costa Silva,7312,Xande Silva
 210156,Taiwo Awoniyi,7814,Taiwo Awoniyi
 210207,Fousseni Diabaté,5767,Fousseni Diabate
 210237,Marko Grujic,1669,Marko Grujic
@@ -848,7 +848,7 @@ player_code,fpl_name,understat_player_id,understat_name
 216183,Brahim Diaz,6421,Brahim Diaz
 216208,Matija Sarkic,,
 216554,Sam Hughes,6104,Will Hughes
-216616,Dara O'Shea,,
+216616,Dara O'Shea,8756,Dara O'Shea
 216620,Marcus Forss,9684,Marcus Forss
 216646,Yoane Wissa,5786,Yoane Wissa
 217331,Sam Surridge,5602,Sam Surridge
@@ -866,9 +866,9 @@ player_code,fpl_name,understat_player_id,understat_name
 218997,Ellis Simms,8582,Ellis Simms
 219002,Dodi Lukebakio,5706,Dodi Lukebakio
 219168,Alexander Isak,5232,Alexander Isak
-219249,Matt O'Riley,,
+219249,Matt O'Riley,13206,Matt O'Riley
 219265,Felix Nmecha,,
-219279,Sugawara Yukinari,,
+219279,Sugawara Yukinari,12761,Yukinari Sugawara
 219291,Claudio Gomes,2383,André Gomes
 219352,Ademola Lookman,5556,Ademola Lookman
 219727,Joel Asoro,1754,Joel Asoro
@@ -1024,7 +1024,7 @@ player_code,fpl_name,understat_player_id,understat_name
 232917,Arijanet Muric,7027,Arijanet Muric
 232928,James Garner,7438,James Garner
 232937,Brandon Williams,8075,Brandon Williams
-232957,Thomas Allan,,
+232957,Thomas Allan,1379,Allan
 232960,Lewis Cass,,
 232964,Lewis Gibson,,
 232977,Kelland Watts,7602,Kelland Watts
@@ -1038,7 +1038,7 @@ player_code,fpl_name,understat_player_id,understat_name
 233849,Archie Mair,,
 233963,Konstantinos Mavropanos,6722,Konstantinos Mavropanos
 234370,Marc Roca Junqué,5086,Marc Roca
-234483,Aiden O'Neill,,
+234483,Aiden O'Neill,1662,Aiden O'Neill
 234720,Giovanni McGregor,,
 234908,Juan Foyth,6306,Juan Foyth
 235382,Steven Alzate,8020,Steven Alzate
@@ -1074,7 +1074,7 @@ player_code,fpl_name,understat_player_id,understat_name
 243016,Alexis Mac Allister,8379,Alexis Mac Allister
 243298,Cody Gakpo,11296,Cody Gakpo
 243343,Jake Cain,,
-243345,Lewis O'Brien,,
+243345,Lewis O'Brien,10759,Lewis O'Brien
 243505,Jakub Moder,9284,Jakub Moder
 243526,Gabriel Gudmundsson,9944,Gabriel Gudmundsson
 243531,Andrew Eleftheriou,5548,Andrew Eleftheriou
@@ -1122,7 +1122,7 @@ player_code,fpl_name,understat_player_id,understat_name
 247670,Valentín Castellanos,10948,Valentín Castellanos
 247693,Randal Kolo Muani,5743,Randal Kolo Muani
 247955,Lutsharel Geertruida,13064,Lutsharel Geertruida
-248056,Tanaka Ao,,
+248056,Tanaka Ao,13834,Ao Tanaka
 248164,Viljami Sinisalo,,
 248853,Dynel Simeu,,
 248854,Josh Brooking,,
@@ -1175,7 +1175,7 @@ player_code,fpl_name,understat_player_id,understat_name
 37096,Lukasz Fabianski,706,Lukasz Fabianski
 37265,Alexis Sánchez,498,Alexis Sánchez
 37339,Ahmed Elmohamady,1685,Ahmed Elmohamady
-3736,John O'Shea,,
+3736,John O'Shea,729,John O'Shea
 37388,Marcin Wasilewski,760,Marcin Wasilewski
 37402,Christian Fuchs,749,Christian Fuchs
 37572,Sergio Agüero,619,Sergio Agüero
@@ -1211,7 +1211,7 @@ player_code,fpl_name,understat_player_id,understat_name
 39253,Jonas Olsson,805,Jonas Olsson
 39270,Marvin Emnes,,
 39472,Dieumerci Mbokani,795,Dieumerci Mbokani
-39476,Sokratis Papastathopoulos,,
+39476,Sokratis Papastathopoulos,371,Sokratis
 39487,Erik Pieters,887,Erik Pieters
 39725,Anders Lindegaard,,
 39790,Francisco Casilla Cortés,,
@@ -1306,7 +1306,7 @@ player_code,fpl_name,understat_player_id,understat_name
 431248,Ladislav Krejcí,12721,Ladislav Krejcí
 431639,Zian Flemming,13729,Zian Flemming
 431774,Kyle Taylor,6044,Charlie Taylor
-43191,Leiva Lucas,,
+43191,Leiva Lucas,475,Lucas Leiva
 431924,Daniel Adshead,,
 431960,Bendegúz Bolla,,
 432160,Shandon Baptiste,9914,Shandon Baptiste
@@ -1339,7 +1339,7 @@ player_code,fpl_name,understat_player_id,understat_name
 434043,Alex Robertson,1688,Andrew Robertson
 434044,Cieran Slicker,,
 434138,Jordan Stevens,7707,Enda Stevens
-434399,Reinildo Mandava,,
+434399,Reinildo Mandava,7432,Reinildo
 434662,Halil Dervişoğlu,9686,Halil Dervisoglu
 434752,Jaka Bijol,6807,Jaka Bijol
 43521,Henri Saivet,778,Henri Saivet
@@ -1399,7 +1399,7 @@ player_code,fpl_name,understat_player_id,understat_name
 441271,Ki-Jana Hoever,8351,Ki-Jana Hoever
 441302,Ian Maatsen,11807,Ian Maatsen
 441428,Jarell Quansah,10187,Jarell Quansah
-441455,Victor da Silva,,
+441455,Victor da Silva,7312,Xande Silva
 442229,Michal Karbownik,,
 442335,Edo Kayembe,10290,Edo Kayembe
 44302,Adlène Guédioura,583,Adlène Guédioura
@@ -1604,7 +1604,7 @@ player_code,fpl_name,understat_player_id,understat_name
 47247,John Fleck,7709,John Fleck
 472713,Aaron Hickey,8942,Aaron Hickey
 472739,Carl Rushworth,,
-472769,Nico O'Reilly,,
+472769,Nico O'Reilly,11592,Nico O'Reilly
 473341,Caleb Okoli,7333,Caleb Okoli
 473342,Stuart McKinstry,10001,Stuart McKinstry
 47390,Neil Taylor,710,Neil Taylor
@@ -1665,7 +1665,7 @@ player_code,fpl_name,understat_player_id,understat_name
 483398,Matthew Whittingham,,
 484420,Enzo Le Fée,8651,Enzo Le Fée
 484658,Kacper Kozłowski,,
-485047,Felipe Rodrigues da Silva,,
+485047,Felipe Rodrigues da Silva,7312,Xande Silva
 485055,Antonín Kinsky,13348,Antonín Kinsky
 485337,Evann Guessand,8006,Evann Guessand
 485711,Benjamin Sesko,11974,Benjamin Sesko
@@ -1682,7 +1682,7 @@ player_code,fpl_name,understat_player_id,understat_name
 487676,Trai Hume,13713,Trai Hume
 487693,Devan Tanton,,
 487702,Luca Koleosho,10620,Luca Koleosho
-48771,Emilio Nsue Lopez,,
+48771,Emilio Nsue Lopez,13200,Fernando López
 48773,Siem de Jong,,
 487818,Joseph Whitworth,11005,Joseph Whitworth
 487828,Omari Forson,12340,Omari Forson
@@ -1794,7 +1794,7 @@ player_code,fpl_name,understat_player_id,understat_name
 496283,Mahamadou Susoho,,
 496661,Tyler Dibling,10586,Tyler Dibling
 496683,Max Kinsey-Wellings,,
-49688,Alfred N'Diaye,,
+49688,Alfred N'Diaye,2144,Alfred N'Diaye
 49696,Mauro Zárate,939,Mauro Zárate
 497605,Liam Gibbs,,
 497606,Tawanda Chirewa,12234,Tawanda Chirewa
@@ -1812,7 +1812,7 @@ player_code,fpl_name,understat_player_id,understat_name
 499309,Marc Guiu Paz,11633,Marc Guiu
 49944,Jake Livermore,1689,Jake Livermore
 49957,Kamil Grosicki,3231,Kamil Grosicki
-499604,Rayan Vitor Simplício Rocha,,
+499604,Rayan Vitor Simplício Rocha,14395,Rayan
 499716,James Rowswell,14176,James Rowswell
 499717,Jayden Meghoma,13067,Jayden Meghoma
 499721,Mikey Moore,12603,Mikey Moore
@@ -1820,7 +1820,7 @@ player_code,fpl_name,understat_player_id,understat_name
 499726,Callum Olusesi,13224,Callum Olusesi
 49982,Sean Morrison,6823,Sean Morrison
 499857,Teddy Sharman-Lowe,8918,Max Lowe
-500016,Welington Damascena Santos,,
+500016,Welington Damascena Santos,13403,Welington
 500040,Cristhian Mosquera,10024,Cristhian Mosquera
 500052,Luca Barrington,,
 500058,Jayden Danns,12455,Jayden Danns
@@ -1874,7 +1874,7 @@ player_code,fpl_name,understat_player_id,understat_name
 511499,Mathys Tel,9780,Mathys Tel
 511504,Kristian Sekularac,,
 511783,Anass Zaroury,11703,Anass Zaroury
-512462,Jake O'Brien,,
+512462,Jake O'Brien,12014,Jake O'Brien
 513046,Danilo dos Santos de Oliveira,,
 513418,Kevin Schade,9156,Kevin Schade
 513433,Brajan Gruda,11310,Brajan Gruda
@@ -1968,7 +1968,7 @@ player_code,fpl_name,understat_player_id,understat_name
 524196,Shaqai Forde,,
 52484,Leon Balogun,394,Leon Balogun
 52538,Fernando Francisco Reges,,
-52775,Nicolas Nkoulou,,
+52775,Nicolas Nkoulou,3387,Nicolas N&#039;Koulou
 5288,Gerhard Tremmel,,
 52940,Daryl Janmaat,764,Daryl Janmaat
 530117,Louis Jackson,10048,Nicolas Jackson
@@ -2016,7 +2016,7 @@ player_code,fpl_name,understat_player_id,understat_name
 536694,Matheus França de Oliveira,12152,Matheus França
 536908,Alejo Véliz,12105,Alejo Véliz
 536916,Facundo Buonanotte,11362,Facundo Buonanotte
-537043,Kaine Kesler Hayden,,
+537043,Kaine Kesler Hayden,9409,Kaine Hayden
 537403,Kadan Young,631,Ashley Young
 538182,Jimi Gower,,
 538206,Jordan Amissah,,
@@ -2116,7 +2116,7 @@ player_code,fpl_name,understat_player_id,understat_name
 559963,Kiano Dyer,,
 560248,Bastien Meupiyou,,
 560262,Junior Kroupi,11504,Eli Junior Kroupi
-560441,Luis Eduardo Soares da Silva,,
+560441,Luis Eduardo Soares da Silva,7312,Xande Silva
 560552,Kevin Santos Lopes de Macedo,,
 56192,Cuco Martina,832,Cuco Martina
 563324,Brayden Clarke,,
@@ -2243,7 +2243,7 @@ player_code,fpl_name,understat_player_id,understat_name
 592662,Tony Yogane,,
 592712,Tom Taylor,,
 592736,Maeson King,,
-592740,Alfie Cresswell,,
+592740,Alfie Cresswell,9220,Charlie Cresswell
 593001,Enso González,12047,Enso González
 593174,Kaye Furo,14356,Kaye Furo
 596042,Kieran Morrison,,
@@ -2270,7 +2270,7 @@ player_code,fpl_name,understat_player_id,understat_name
 601496,Jili Buyabu,,
 60165,Wahbi Khazri,734,Wahbi Khazri
 601956,Saheed Olagunju,,
-601975,Yegor Yarmolyuk,,
+601975,Yegor Yarmolyuk,11772,Yehor Yarmolyuk
 60232,Craig Dawson,804,Craig Dawson
 60252,Andros Townsend,775,Andros Townsend
 60270,Simone Zaza,1642,Simone Zaza
@@ -2445,7 +2445,7 @@ player_code,fpl_name,understat_player_id,understat_name
 75115,Callum Wilson,468,Callum Wilson
 7525,Steven Pienaar,924,Steven Pienaar
 7551,Joleon Lescott,664,Joleon Lescott
-75773,Chung-yong Lee,,
+75773,Chung-yong Lee,526,Lee Chung-yong
 75826,Danny Ward,6830,Danny Ward
 75880,Daniel Ayala,1718,Daniel Ayala
 76306,Lukas Rupp,62,Lukas Rupp
@@ -2454,7 +2454,7 @@ player_code,fpl_name,understat_player_id,understat_name
 76360,Nathaniel Mendez-Laing,6824,Nathaniel Mendez-Laing
 7638,Mark Hudson,,
 7645,Phil Jagielka,587,Phil Jagielka
-76542,Sung-yueng Ki,,
+76542,Sung-yueng Ki,723,Ki Sung-yueng
 77359,Florian Lejeune,5073,Florian Lejeune
 77454,Fabio Borini,737,Fabio Borini
 77610,Danny Batth,,

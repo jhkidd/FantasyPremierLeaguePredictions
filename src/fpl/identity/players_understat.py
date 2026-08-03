@@ -95,12 +95,17 @@ def _understat_players(season: Season, *, data_root: Path | None) -> pl.DataFram
 
 
 def _normalize_name(name: str) -> str:
-    """Fold accents, case, and hyphens away for a name-equality comparison
-    (``Bešić`` == ``Besic``; ``Ward-Prowse`` tokenizes as ``ward prowse``)."""
+    """Fold accents, case, hyphens, and apostrophes away for a name-equality
+    comparison (``Bešić`` == ``Besic``; ``Ward-Prowse`` tokenizes as ``ward
+    prowse``; ``O'Connell`` == ``OConnell`` so it lines up with Understat's
+    HTML-entity-encoded apostrophe, ``O&#039;Connell``, once that's also
+    unescaped)."""
+    import html
     import unicodedata
 
-    folded = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
-    return " ".join(folded.replace("-", " ").split())
+    unescaped = html.unescape(name)
+    folded = unicodedata.normalize("NFKD", unescaped).encode("ascii", "ignore").decode().lower()
+    return " ".join(folded.replace("-", " ").replace("'", "").split())
 
 
 def _best_understat_match(fpl_name: str, candidates: pl.DataFrame) -> tuple[int, str] | None:
@@ -126,7 +131,13 @@ def _best_understat_match(fpl_name: str, candidates: pl.DataFrame) -> tuple[int,
        King``) found live during probing. Requiring the surname token to
        match keeps those genuine collisions correctly ambiguous while
        resolving names that only differ in first-name spelling or order.
-    3. An ordered-subsequence match (:func:`_is_ordered_subsequence`): every
+    3. A reordered-tokens match: the same set of name tokens, in any order,
+       when only one candidate shares that exact set. Understat records
+       some Japanese players surname-first as FPL does not - or vice versa
+       (``Sugawara Yukinari`` / ``Yukinari Sugawara``) - so token order
+       alone should not block a match once every token is accounted for on
+       both sides.
+    4. An ordered-subsequence match (:func:`_is_ordered_subsequence`): every
        token of the shorter name appears, in order, within the longer one.
        Catches FPL's occasional full legal name against Understat's shorter
        public one (``Bernardo Mota Veiga de Carvalho e Silva`` contains
@@ -152,6 +163,16 @@ def _best_understat_match(fpl_name: str, candidates: pl.DataFrame) -> tuple[int,
     }
     if len({player_id for player_id, _name in surname_matches}) == 1:
         return next(iter(surname_matches))
+
+    target_tokens = normalized_target.split()
+    reordered_matches = {
+        (row["understat_player_id"], row["understat_name"])
+        for row in candidates.iter_rows(named=True)
+        if len(target_tokens) > 1
+        if sorted(_normalize_name(row["understat_name"]).split()) == sorted(target_tokens)
+    }
+    if len({player_id for player_id, _name in reordered_matches}) == 1:
+        return next(iter(reordered_matches))
 
     subsequence_matches = {
         (row["understat_player_id"], row["understat_name"])

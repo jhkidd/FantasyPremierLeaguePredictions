@@ -153,18 +153,58 @@ class TestDraftPlayersCrosswalk:
         assert row["understat_name"] == "Bernardo Silva"
 
     def test_out_of_order_tokens_do_not_match_via_subsequence(self, tmp_path: Path) -> None:
-        """Same tokens, wrong order ('Silva Bernardo' vs 'Bernardo Silva')
-        must not be accepted - the subsequence pass requires order to
-        agree, not just presence."""
+        """'Silva Bernardo Mota' against Understat's 'Bernardo Mota Silva'
+        shares every token but not the order the subsequence pass expects
+        - 'silva' would have to appear before 'bernardo' and 'mota' in the
+        longer name, which it doesn't - so it must not be accepted (the
+        reordered-tokens pass doesn't apply here either, since the two
+        names have different token counts once an extra distractor token
+        is added to Understat's side)."""
         _write_players_raw(
             tmp_path,
             SEASON,
             body=(b"code,first_name,second_name\n620,Silva,Bernardo\n"),
         )
-        _write_understat_league_data(tmp_path, SEASON, [_understat_player("999", "Bernardo Silva")])
+        _write_understat_league_data(
+            tmp_path, SEASON, [_understat_player("999", "Bernardo Mota Silva")]
+        )
         draft = draft_players_crosswalk([SEASON], data_root=tmp_path)
         row = draft.filter(pl.col("player_code") == "620").row(0, named=True)
         assert row["understat_player_id"] is None
+
+    def test_reordered_tokens_match_across_naming_conventions(self, tmp_path: Path) -> None:
+        """Understat sometimes records a Japanese player surname-first
+        where FPL doesn't, or vice versa ('Sugawara Yukinari' / 'Yukinari
+        Sugawara') - the same tokens in a different order should still
+        resolve when only one Understat candidate has that exact set."""
+        _write_players_raw(
+            tmp_path,
+            SEASON,
+            body=(b"code,first_name,second_name\n620,Sugawara,Yukinari\n"),
+        )
+        _write_understat_league_data(
+            tmp_path, SEASON, [_understat_player("999", "Yukinari Sugawara")]
+        )
+        draft = draft_players_crosswalk([SEASON], data_root=tmp_path)
+        row = draft.filter(pl.col("player_code") == "620").row(0, named=True)
+        assert row["understat_player_id"] == 999
+        assert row["understat_name"] == "Yukinari Sugawara"
+
+    def test_apostrophes_are_stripped_before_matching(self, tmp_path: Path) -> None:
+        """Understat records an Irish surname's apostrophe as an HTML
+        entity ('Jack O&#039;Connell'); the exact-match pass should still
+        resolve it against FPL's plain "Jack O'Connell"."""
+        _write_players_raw(
+            tmp_path,
+            SEASON,
+            body=(b"code,first_name,second_name\n620,Jack,O'Connell\n"),
+        )
+        _write_understat_league_data(
+            tmp_path, SEASON, [_understat_player("999", "Jack O&#039;Connell")]
+        )
+        draft = draft_players_crosswalk([SEASON], data_root=tmp_path)
+        row = draft.filter(pl.col("player_code") == "620").row(0, named=True)
+        assert row["understat_player_id"] == 999
 
     def test_no_ingested_season_yields_an_empty_frame(self, tmp_path: Path) -> None:
         draft = draft_players_crosswalk([SEASON], data_root=tmp_path)
