@@ -112,6 +112,25 @@ class TestDraftPlayersCrosswalk:
         row = draft.filter(pl.col("player_code") == "111").row(0, named=True)
         assert row["understat_player_id"] is None
 
+    def test_shared_surname_alone_does_not_falsely_match_a_different_person(
+        self, tmp_path: Path
+    ) -> None:
+        """A real production bug: the surname-only pass once matched FPL's
+        'Toby King' to Understat's unrelated 'Joshua King' purely because
+        'Joshua King' was the only Understat player with surname 'King'
+        that season - regardless of whether the first names had anything
+        in common. Requiring the first initial to also agree must reject
+        this, leaving it unmatched rather than wrong."""
+        _write_players_raw(
+            tmp_path,
+            SEASON,
+            body=(b"code,first_name,second_name\n620,Toby,King\n"),
+        )
+        _write_understat_league_data(tmp_path, SEASON, [_understat_player("465", "Joshua King")])
+        draft = draft_players_crosswalk([SEASON], data_root=tmp_path)
+        row = draft.filter(pl.col("player_code") == "620").row(0, named=True)
+        assert row["understat_player_id"] is None
+
     def test_shared_first_name_alone_is_not_a_false_collision(self, tmp_path: Path) -> None:
         """A live-probe regression: 'James Ward-Prowse' sharing the token
         'James' with several unrelated Understat players ('James Milner',

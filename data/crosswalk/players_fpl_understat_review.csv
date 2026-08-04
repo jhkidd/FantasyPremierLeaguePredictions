@@ -1,60 +1,65 @@
-player_code,fpl_name,candidates
-100649,Bernard Anício Caldeira Duarte,Bernard (7063)
-109745,Kepa Arrizabalaga,Kepa (5061)
-114128,Jonathan Castro Otto,""
-116404,Felipe Augusto de Almeida Monteiro,Felipe (7921)
-116535,Alisson Ramses Becker,Alisson (1257)
-119765,Allan Marques Loureiro,""
-121160,Ederson Santana de Moraes,Ederson (6054)
-145235,Jose Angel Esmoris Tasende,""
-148508,Mahmoud Ahmed Ibrahim Hassan,""
-158074,Gabriel Armando de Abreu,Gabriel (493); Gabriel (5613)
-162651,Samir Caetano de Souza Santos,Samir (1142); Souza (14410); Vinicius Souza (10872)
-167767,Robert Kenedy Nunes do Nascimento,Kenedy (689)
-180974,Joelinton Cássio Apolinário de Lira,Joelinton (87)
-183751,Manuel Benson Hedilazio,Benson Manuel (11702)
-184029,Martin Ødegaard,Martin Odegaard (2517)
-203325,André-Frank Zambo Anguissa,André (13022); Franck Zambo (6434)
-212319,Richarlison de Andrade,Richarlison (6026)
-212721,Lyanco Evangelista Silveira Neves Vojnovic,Lyanco (6252)
-213345,Wesley Moraes,Wesley (7724)
-219961,Raphael Dias Belloli,""
-225295,Mateus Cardoso Lemos Martins,""
-226597,Gabriel Magalhães,Gabriel (493); Gabriel (5613)
-241157,Emerson Aparecido Leite de Souza Junior,Emerson (1245); Emerson (7430); Souza (14410); Vinicius Souza (10872)
-27789,Fernando Luiz Rosa,Fernando (615)
-39790,Francisco Casilla Cortés,Kiko Casilla (2259)
-40559,Fabricio Agosto Ramírez,""
-424001,Vini de Souza Costa,Souza (14410); Vinicius Souza (10872)
-43020,Javier Hernández Balcázar,""
-437858,Vitor Ferreira,""
-444102,Francisco Evanilson de Lima Barbosa,Evanilson (12963)
-463903,Jesper Lindstrøm,Jesper Lindstrom (9752)
-478028,Kayky da Silva Chagas,Jota Silva (12766); Kayky (10203)
-479683,Marcus Oliveira Alencar,""
-486385,Norberto Bercique Gomes Betuncal,""
-49579,Pedro Rodríguez Ledesma,Pedro (687)
-502500,Igor Thiago Nascimento Rodrigues,Thiago (13222)
-508395,Yegor Yarmoliuk,""
-510281,Sávio 'Savinho' Moreira de Oliveira,Sávio (11735)
-510363,Francisco Jorge Tomás Oliveira,""
-513046,Danilo dos Santos de Oliveira,Danilo (11317); Danilo (2244)
-518030,Max Weiß,Max Weiss (13731)
-52287,Evandro Goebel,Evandro (5550)
-52538,Fernando Francisco Reges,Fernando (615)
-530335,Pablo Felipe Pereira de Jesus,Felipe (7921); Jesús Vallejo (5234); Pablo (14290)
-54484,Francisco Femenía Far,Kiko Femenía (5043)
-560552,Kevin Santos Lopes de Macedo,Kevin (14030)
-575458,Jair Paula da Cunha Filho,Jair (13779)
-60706,Adrián San Miguel del Castillo,Adrián (527)
-61256,Carlos Henrique Casimiro,""
-61262,Oscar dos Santos Emboaba Junior,Oscar (692)
-61316,Jose Luis Mato Sanmartín,""
-616221,João Victor de Souza Menezes,Souza (14410); Vinicius Souza (10872)
-624773,Estêvão Almeida de Oliveira Gonçalves,Estêvão (13775)
-80792,Greg Cunninghamm,Greg Cunningham (6831)
-80954,Rodrigo Moreno,Rodrigo (2381); Rodrigo Muniz (10717)
-85955,Jorge Luiz Frello Filho,""
-86173,Manuel Agudo Durán,Benson Manuel (11702)
-89274,José Ignacio Peleteiro Romallo,""
-93127,Jesé Rodríguez Ruiz,Jesé (2256)
+player_code,fpl_name,candidates,total_minutes
+122798,Andrew Robertson,Andrew Robertson (1688),24836
+165809,Bernardo Mota Veiga de Carvalho e Silva,Adrien Silva (6464); Bernardo (1716); Bernardo (5245); Bernardo Silva (3635); David Silva (617); Xande Silva (7312),21611
+115556,Ben Davies,Ben Davies (660),16040
+220566,Rodrigo Hernandez,"",15535
+103914,Charlie Taylor,Charlie Taylor (6044),13970
+47431,Willian Borges Da Silva,Adrien Silva (6464); Bernardo Silva (3635); David Silva (617); Willian (700); Xande Silva (7312),13918
+27789,Fernando Luiz Rosa,Fernando (615); Fernando López (13200),12542
+116643,Fabio Henrique Tavares,Fabio (1752),11627
+20664,David Silva,Adrien Silva (6464); Bernardo Silva (3635); David Silva (617); Xande Silva (7312),9411
+101582,Frederico Rodrigues de Paula Santos,Andrey Santos (11808),8839
+224024,Lucas Tolentino Coelho de Lima,Lucas Paquetá (7365),8668
+109533,Emerson Palmieri dos Santos,Andrey Santos (11808); Emerson (1245),8615
+48760,Mathias Jorgensen,"",8266
+510362,Toti António Gomes,Toti (10293),8145
+575476,Murillo Santiago Costa dos Santos,Andrey Santos (11808); Murillo (12123),8108
+441191,Valentino Livramento,Valentino Livramento (9512),7689
+204214,Pervis Estupiñán,Estupiñán (5136),6315
+50229,Matt Phillips,Kalvin Phillips (8719); Matt Phillips (1737),6083
+155405,Kalvin Phillips,Kalvin Phillips (8719); Matt Phillips (1737),5938
+457569,Đorđe Petrović,Djordje Petrovic (12032),5406
+509291,André Trindade da Costa Neto,André (13022),5232
+67527,Allan-Roméo Nyom,Nyom (565),4944
+503714,Lesley Ugochukwu,Chimuanya Ugochukwu (9451),4278
+39476,Sokratis Papastathopoulos,Sokratis (371),3894
+182539,Daniel Ceballos Fernández,Dani Ceballos (2446); Álvaro Fernández (5191),3296
+467169,Antony Matheus dos Santos,Andrey Santos (11808); Antony (11094),3249
+11352,Bruno Saltor Grau,Bruno (6046),3145
+146426,Oluwasemilogo Adesewo Ibidapo Ajayi,Semi Ajayi (4490),2779
+209362,Bernardo Fernandes da Silva Junior,Adrien Silva (6464); Bernardo (1716); Bernardo (5245); Bernardo Silva (3635); David Silva (617); Xande Silva (7312),2629
+95463,Danny Ward,Danny Ward (473); Danny Ward (6830),2565
+432714,James McAtee,James McAtee (10126),2461
+551483,Álex Jiménez Sánchez,Alejandro Jiménez (12168),2315
+441455,Victor da Silva,Adrien Silva (6464); Bernardo Silva (3635); David Silva (617); Xande Silva (7312),2311
+485047,Felipe Rodrigues da Silva,Adrien Silva (6464); Bernardo Silva (3635); David Silva (617); Xande Silva (7312),2231
+100180,Danilo Luiz da Silva,Adrien Silva (6464); Bernardo Silva (3635); Danilo (2244); David Silva (617); Xande Silva (7312),2145
+488024,Yéremy Pino Santos,Andrey Santos (11808); Yeremi Pino (9024),2074
+434399,Reinildo Mandava,Reinildo (7432),1966
+54771,Fabio Pereira da Silva,Adrien Silva (6464); Bernardo Silva (3635); David Silva (617); Fabio (1752); Xande Silva (7312),1847
+466052,Rayan Cherki,Mathis Cherki (8094); Rayan (14395),1772
+222564,Francisco Machado Mota de Castro Trincão,Trincão (8934),1328
+532605,Andrey Nascimento dos Santos,Andrey Santos (11808),1254
+241231,Jordan Beyer,Louis Beyer (6557),1234
+163463,Papa Alioune Ndiaye,Badou Ndiaye (6525),1138
+499604,Rayan Vitor Simplício Rocha,Rayan (14395),1110
+240796,Álvaro Fernández,Álvaro Fernández (5191),1080
+55317,Bernardo Espinosa Zúñiga,Bernardo (1716); Bernardo (5245); Bernardo Silva (3635),975
+46483,Adrien Sebastian Perruchet Silva,Adrien Silva (6464); Bernardo Silva (3635); David Silva (617); Xande Silva (7312),847
+52538,Fernando Francisco Reges,Fernando (615); Fernando López (13200),568
+40276,Bojan Krkic,Bojan (871),546
+500016,Welington Damascena Santos,Andrey Santos (11808); Welington (13403),478
+75826,Danny Ward,Danny Ward (473); Danny Ward (6830),435
+48771,Emilio Nsue Lopez,Fernando López (13200); Nsue (1757),320
+39790,Francisco Casilla Cortés,Kiko Casilla (2259),270
+643135,Fer López González,Fernando López (13200),228
+510363,Francisco Jorge Tomás Oliveira,"",209
+40559,Fabricio Agosto Ramírez,"",180
+616221,João Victor de Souza Menezes,Souza (14410),142
+141569,Bonatini Lohner Maia Bonatini,Léo Bonatini (6855),130
+653481,Alysson Edward Franco da Rocha dos Santos,Alysson Edward (14446); Andrey Santos (11808),47
+209925,Alexandre Nascimento Costa Silva,Adrien Silva (6464); Bernardo Silva (3635); David Silva (617); Xande Silva (7312),17
+94926,Olayinka Fredrick Oladotun Ladapo,Freddie Ladapo (1778),16
+166325,Carlos Ribeiro Dias,"",6
+478028,Kayky da Silva Chagas,Adrien Silva (6464); Bernardo Silva (3635); David Silva (617); Kayky (10203); Xande Silva (7312),6
+479683,Marcus Oliveira Alencar,"",1

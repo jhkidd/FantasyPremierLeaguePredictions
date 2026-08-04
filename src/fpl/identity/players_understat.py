@@ -119,18 +119,19 @@ def _best_understat_match(fpl_name: str, candidates: pl.DataFrame) -> tuple[int,
     1. Exact match on the full normalized name. This alone would still miss
        genuine spelling variants (``Muhamed Besic`` / ``Muhamed Bešić``,
        ``Matthew James`` / ``Matty James``), so:
-    2. A surname-only match: the same last name-token, when only one
-       Understat candidate shares it. Plain first-name-or-any-token overlap
-       (as ``identity/players.py``'s cross-season check uses, where a reused
-       ``player_code`` would be the only cause of a false positive) is too
-       loose across sources - shared first names are common enough
-       (``James Ward-Prowse`` sharing ``James`` with ``James Milner``,
-       ``James Tomkins``, ... ; ``Lucas Digne`` sharing ``Lucas`` with
-       ``Lucas Moura``, ``Lucas Paquetá``, ...) that it produced false
-       ambiguity, not just the genuine collisions (``Gabriel``, ``Joshua
-       King``) found live during probing. Requiring the surname token to
-       match keeps those genuine collisions correctly ambiguous while
-       resolving names that only differ in first-name spelling or order.
+    2. A surname-and-first-initial match: the same last name-token *and*
+       the same first-name initial, when only one Understat candidate
+       shares both. Surname alone is not enough - an earlier version of
+       this pass matched on surname only and produced real wrong-identity
+       assignments (FPL's ``Toby King`` incorrectly resolved to
+       Understat's unrelated ``Joshua King``; ``Carl Stewart`` to
+       ``Kevin Stewart``) purely because they happened to be the only
+       Understat player with that surname that season, regardless of
+       whether they were remotely the same person. Requiring the first
+       initial too still accepts the spelling variants this pass exists
+       for (``Muhamed Besic`` / ``Muhamed Bešić``, ``Matthew James`` /
+       ``Matty James`` both start with ``M``), while no longer treating
+       "shares a surname" as identity.
     3. A reordered-tokens match: the same set of name tokens, in any order,
        when only one candidate shares that exact set. Understat records
        some Japanese players surname-first as FPL does not - or vice versa
@@ -154,12 +155,16 @@ def _best_understat_match(fpl_name: str, candidates: pl.DataFrame) -> tuple[int,
     if len({player_id for player_id, _name in exact}) == 1:
         return next(iter(exact))
 
-    target_surname = normalized_target.split()[-1] if normalized_target else ""
+    target_tokens_for_surname = normalized_target.split()
+    target_surname = target_tokens_for_surname[-1] if target_tokens_for_surname else ""
+    target_first_initial = target_tokens_for_surname[0][0] if target_tokens_for_surname else ""
     surname_matches = {
         (row["understat_player_id"], row["understat_name"])
         for row in candidates.iter_rows(named=True)
-        if _normalize_name(row["understat_name"]).split()[-1:] == [target_surname]
         if target_surname
+        if (candidate_tokens := _normalize_name(row["understat_name"]).split())
+        if candidate_tokens[-1] == target_surname
+        if candidate_tokens[0][:1] == target_first_initial
     }
     if len({player_id for player_id, _name in surname_matches}) == 1:
         return next(iter(surname_matches))
