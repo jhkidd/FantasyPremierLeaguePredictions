@@ -313,7 +313,15 @@ fpl crosswalk refresh       # extended to draft new team_external_ids rows (neve
 - `facts/team_fixture` written for at least the current season, key-unique, with the leakage-relevant columns (`elo_rating`, `fixture_count_prior_N_days`) never referencing same-day or future information.
 - Club Elo connectivity independently re-verified from an actual GitHub Actions runner (Finding A), not inferred from the sandbox result.
 
----
+**Update 2026-08-04 (tasks 12 and 13 complete):** `facts/team_fixture` is implemented in `src/fpl/facts/team_fixture.py`, TDD throughout (`tests/facts/test_team_fixture.py`, 12 tests), full production rigor matching tasks 10/11. Key points versus the spec above:
+
+- `fpl facts` was extended to always attempt both `player_fixture` and `team_fixture` in one run (rather than adding a second positional table argument) — simpler for the common case of running facts for a season, and each half independently reports `written`/`skipped` with its own detail message, so a season missing one Tier 2 source still gets the other table.
+- `FACTS_TABLE_GATES["team_fixture"]` added to `src/fpl/quality/checks.py` with `unique_key(["season", "fixture_id", "team_id"])`; `fpl check --layer facts` now covers it automatically (no separate `--table` flag needed, since the existing check loop already iterates every registered facts table).
+- Verified end-to-end against real staged 2026-27 data: 380 FPL fixtures → 760 `team_fixture` rows, `fpl check --layer facts` clean. `TeamFixtureFactsResult.unresolved_teams` surfaced ~470 club names from Club Elo/football-data.co.uk/openfootball that fall outside the Premier League crosswalk (foreign clubs in European competition legs, non-EPL leagues in the odds file) — this is expected and informational, not a blocking gate, since the crosswalk only needs to resolve the 20 current EPL teams.
+- Two real implementation bugs were caught only by the real-data run (not the unit tests, whose fixtures didn't happen to exercise them): (1) the Elo T-1 join compared a `pl.Date` column against a raw `pl.Datetime` kickoff without normalising to calendar dates first, so a same-day rating (00:00) still counted as "before" a same-day kickoff (14:00) — fixed by taking `.date()` on the kickoff before filtering; (2) `sorted()` on the unresolved-team-name set raised `TypeError` because real data contains `None` team names in some source rows — fixed by filtering `None` out before sorting.
+- Data committed: `data/staged/{teams,fixtures,events,players,price_snapshots,availability_snapshots}/season=2026-27/` (freshly staged from already-captured raw FPL data) and `data/facts/team_fixture/season=2026-27/part.parquet`.
+
+
 
 ## Cross-cutting
 

@@ -161,6 +161,9 @@ FACTS_TABLE_GATES: dict[str, list[Gate]] = {
         _defensive_contribution_formula_gate(),
         _obs_constant_within_season_gate(),
     ],
+    "team_fixture": [
+        unique_key(["season", "fixture_id", "team_id"]),
+    ],
 }
 
 

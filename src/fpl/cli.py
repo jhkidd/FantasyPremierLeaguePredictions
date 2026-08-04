@@ -29,6 +29,7 @@ from fpl.config import (
 )
 from fpl.facts.player_fixture import write_player_fixture_facts
 from fpl.facts.points import write_points
+from fpl.facts.team_fixture import write_team_fixture_facts
 from fpl.identity.players import (
     build_players_crosswalk,
     unmapped_players_with_minutes,
@@ -616,10 +617,22 @@ def facts(
     facts_result = write_player_fixture_facts(parsed, data_root=data_root)
     if not facts_result.written:
         typer.echo(f"player_fixture: skipped, {facts_result.detail}")
-        return
-    typer.echo(f"player_fixture: written, {facts_result.frame.height} row(s)")
+    else:
+        typer.echo(f"player_fixture: written, {facts_result.frame.height} row(s)")
 
-    if rules is None:
+    team_fixture_result = write_team_fixture_facts(parsed, data_root=data_root)
+    if not team_fixture_result.written:
+        typer.echo(f"team_fixture: skipped, {team_fixture_result.detail}")
+    else:
+        typer.echo(f"team_fixture: written, {team_fixture_result.frame.height} row(s)")
+        if team_fixture_result.unresolved_teams:
+            typer.secho(
+                f"  unresolved team name(s): {team_fixture_result.unresolved_teams}",
+                err=True,
+                fg=typer.colors.YELLOW,
+            )
+
+    if rules is None or not facts_result.written:
         return
     try:
         points_result = write_points(parsed, rules, data_root=data_root)
