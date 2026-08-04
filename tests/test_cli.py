@@ -40,9 +40,7 @@ def test_version() -> None:
 
 @pytest.mark.parametrize(
     "argv",
-    [
-        ["features", "--as-of", "2026-08-14T11:30:00Z"],
-    ],
+    [],
 )
 def test_unbuilt_commands_exit_distinctly_and_name_their_phase(argv: list[str]) -> None:
     """Visible and honestly unfinished beats absent: the exit code is distinct
@@ -50,6 +48,23 @@ def test_unbuilt_commands_exit_distinctly_and_name_their_phase(argv: list[str]) 
     result = runner.invoke(app, argv)
     assert result.exit_code == exit_codes.NOT_IMPLEMENTED
     assert "phase" in result.output
+
+
+def test_features_with_no_staged_data_fails_with_detail(isolated_data_root: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--data-root",
+            str(isolated_data_root),
+            "features",
+            "--season",
+            "2025-26",
+            "--as-of",
+            "2026-08-14T11:30:00Z",
+        ],
+    )
+    assert result.exit_code == exit_codes.FAILURE
+    assert "features: skipped" in result.output
 
 
 def test_stage_fpl_with_no_raw_data_reports_nothing_captured(isolated_data_root: Path) -> None:

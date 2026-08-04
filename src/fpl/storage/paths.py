@@ -18,6 +18,7 @@ from fpl.config import Config, Season
 __all__ = [
     "chunk_partition",
     "crosswalk_file",
+    "data_features_table",
     "decode_as_of",
     "encode_as_of",
     "facts_table",
@@ -240,3 +241,18 @@ def crosswalk_file(name: str, *, data_root: Path | None = None) -> Path:
     whole point of a crosswalk is to collapse many seasons onto one identity
     (spec plan §6.2/§6.3)."""
     return _root(data_root) / "crosswalk" / _check_component(name, label="crosswalk file")
+
+
+def data_features_table(season: Season, as_of: datetime, *, data_root: Path | None = None) -> Path:
+    """A debug-only feature snapshot: ``data/features/season=.../as_of=...``.
+
+    Never the source of truth — ``features.library.build`` is always
+    recomputed on demand (spec §4). This partition exists purely so a build
+    can be inspected after the fact, mirroring ``raw_partition``'s
+    ``as_of=`` naming."""
+    return (
+        _root(data_root)
+        / "features"
+        / f"season={season}"
+        / f"as_of={encode_as_of(as_of)}"
+    )

@@ -30,6 +30,7 @@ from fpl.config import (
 from fpl.facts.player_fixture import write_player_fixture_facts
 from fpl.facts.points import write_points
 from fpl.facts.team_fixture import write_team_fixture_facts
+from fpl.features import library as features_library
 from fpl.identity.players import (
     build_players_crosswalk,
     unmapped_players_with_minutes,
@@ -89,6 +90,7 @@ from fpl.staging.pipeline import (
 )
 from fpl.staging.vaastav import ERA_BY_SEASON
 from fpl.storage import paths
+from fpl.storage.parquet_io import write_parquet
 from fpl.storage.raw_io import write_raw
 from fpl.understat_capture import capture_league_data, capture_match_data
 
@@ -146,6 +148,16 @@ def _parse_season(value: str) -> Season:
         return Season.parse(value)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+
+
+def _parse_as_of(value: str) -> datetime:
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise typer.BadParameter(f"malformed --as-of {value!r}: {exc}") from exc
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment
 
 
 SeasonOption = Annotated[
@@ -805,11 +817,37 @@ def check(
 
 @app.command()
 def features(
-    as_of: Annotated[str, typer.Option("--as-of", help="ISO 8601 instant, UTC.")],
-    horizon: Annotated[int, typer.Option("--horizon", help="Gameweeks ahead.")] = 5,
+    ctx: typer.Context,
+    season: SeasonOption = str(CURRENT_SEASON),
+    as_of: Annotated[
+        str, typer.Option("--as-of", help="ISO 8601 instant, UTC. Defaults to now.")
+    ] = "",
+    horizon_gameweeks: Annotated[
+        int, typer.Option("--horizon-gameweeks", help="Gameweeks ahead.")
+    ] = 1,
 ) -> None:
-    """Build features at a point in time. Inspection only — writes to scratch/."""
-    _pending(8, "features")
+    """Build features at a point in time. Debug snapshot only — writes to
+    data/features/, never the source of truth (that is features.library.build)."""
+    parsed_season = _parse_season(season)
+    moment = _parse_as_of(as_of) if as_of else datetime.now(UTC)
+    data_root = _data_root(ctx)
+
+    result = features_library.build(
+        parsed_season, moment, horizon_gameweeks=horizon_gameweeks, data_root=data_root
+    )
+    if result.frame is None:
+        typer.secho(f"features: skipped, {result.detail}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(exit_codes.FAILURE)
+
+    out_dir = paths.data_features_table(parsed_season, moment, data_root=data_root)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    write_parquet(result.frame, out_dir / "part.parquet")
+
+    typer.echo(f"features: {result.frame.height} row(s) written to {out_dir / 'part.parquet'}")
+    typer.echo(
+        f"features: team resolution fell back to current team for "
+        f"{result.diagnostics.fallback_count} player(s)"
+    )
 
 
 def _rules_for_season(season: Season) -> str:
