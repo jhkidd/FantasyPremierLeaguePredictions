@@ -3,6 +3,9 @@ name: Daily snapshot
 # Pre-season price and ownership movement is use-it-or-lose-it: FPL publishes
 # only the current value of every field, so a day not captured is a day gone.
 # This runs from now rather than from phase 3 for that reason (spec §8).
+#
+# The job both ingests and stages. An earlier version only ingested, and the
+# staged layer silently fell ten days behind raw before anyone noticed.
 
 on:
   schedule:
@@ -28,23 +31,32 @@ concurrency:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup
+
+      - name: Configure git
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
       - name: Ingest
         env:
           FPL_ENTRY_ID: ${{ vars.FPL_ENTRY_ID }}
         run: uv run fpl --verbose ingest fpl ${{ inputs.force && '--force' || '' }}
 
-      - name: Commit
+      # Raw lands on its own, before anything derived is attempted. Raw is the
+      # unrecoverable artefact — FPL publishes only current values, so a day
+      # not captured is gone — whereas staged is a pure function of raw and can
+      # be rebuilt at any time. Committing them together would let a staging
+      # bug take the day's raw snapshot down with it.
+      - name: Commit raw
         run: |
           set -euo pipefail
-          git config user.name  'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add data/
+          git add data/raw/
           if git diff --cached --quiet; then
             echo "No change upstream; nothing to commit."
             exit 0
@@ -52,5 +64,25 @@ jobs:
           git commit -m "data: daily snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
           # Rebase rather than merge: the raw tree is append-only, so a
           # concurrent snapshot adds files beside ours and never conflicts.
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      # Runs unconditionally, including on the days ingest found nothing new.
+      # price_snapshots and availability_snapshots are built by concatenating
+      # every as_of partition, so staging is what turns the accumulating raw
+      # captures into a usable series; running it every time also means a run
+      # that failed here yesterday is repaired today rather than compounding.
+      - name: Stage
+        run: uv run fpl --verbose stage fpl
+
+      - name: Commit staged
+        run: |
+          set -euo pipefail
+          git add data/staged/
+          if git diff --cached --quiet; then
+            echo "Staged tables already current; nothing to commit."
+            exit 0
+          fi
+          git commit -m "data: stage snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
           git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
