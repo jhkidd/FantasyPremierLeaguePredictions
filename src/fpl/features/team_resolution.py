@@ -95,9 +95,7 @@ def resolve_teams(
     current_players = _current_players(season, data_root=data_root)
     current_team_by_player: dict[int, int] = {}
     if current_players is not None:
-        current_team_by_player = dict(
-            current_players.select("player_id", "team_id").iter_rows()
-        )
+        current_team_by_player = dict(current_players.select("player_id", "team_id").iter_rows())
 
     facts = _player_fixture_facts(season, data_root=data_root)
 

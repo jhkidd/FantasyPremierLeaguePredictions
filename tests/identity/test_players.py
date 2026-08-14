@@ -122,14 +122,10 @@ class TestValidateNameVariants:
 
         conflicts = validate_name_variants(crosswalk)
 
-        assert conflicts == [
-            PlayerCodeConflict("999", ("Wayne Hennessey", "Kepa Arrizabalaga"))
-        ]
+        assert conflicts == [PlayerCodeConflict("999", ("Wayne Hennessey", "Kepa Arrizabalaga"))]
 
     def test_a_single_spelling_is_never_a_conflict(self) -> None:
-        crosswalk = pl.DataFrame(
-            {"player_code": ["123"], "name_variants": [["Muhamed Bešić"]]}
-        )
+        crosswalk = pl.DataFrame({"player_code": ["123"], "name_variants": [["Muhamed Bešić"]]})
 
         assert validate_name_variants(crosswalk) == []
 
@@ -187,9 +183,7 @@ class TestUnmappedPlayersWithMinutes:
         crosswalk = pl.DataFrame({"player_code": pl.Series([], dtype=pl.Utf8)})
         assert unmapped_players_with_minutes(SEASON_2526, crosswalk, data_root=tmp_path) == []
 
-    def test_a_player_with_minutes_and_no_crosswalk_entry_is_unmapped(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_player_with_minutes_and_no_crosswalk_entry_is_unmapped(self, tmp_path: Path) -> None:
         data_root = tmp_path / "data"
         self._write_merged_gw(data_root, SEASON_2526)
         stage_vaastav_source(SEASON_2526, data_root=data_root)

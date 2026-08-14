@@ -27,10 +27,10 @@ import pytest
 from fpl.config import Season
 from fpl.identity.teams_from_matches import derive_teams
 from fpl.staging.fixtures_from_facts import fixtures_from_player_stats
+from fpl.staging.vaastav import stage_fixtures_csv
 from fpl.storage import paths
 from fpl.storage.parquet_io import read_parquet
 from fpl.storage.raw_io import read_raw
-from fpl.staging.vaastav import stage_fixtures_csv
 
 DATA_ROOT = Path(__file__).resolve().parents[1] / "data"
 

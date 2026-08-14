@@ -96,12 +96,7 @@ class TestWritePoints:
         result = write_points(SEASON, "2025-26", data_root=data_root)
         assert result.written
         out_path = (
-            data_root
-            / "facts"
-            / "points"
-            / "rules=2025-26"
-            / "season=2025-26"
-            / "part.parquet"
+            data_root / "facts" / "points" / "rules=2025-26" / "season=2025-26" / "part.parquet"
         )
         assert out_path.exists()
 

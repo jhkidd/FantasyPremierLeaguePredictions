@@ -200,9 +200,7 @@ def _with_team_codes(
     teams = read_parquet(teams_path).select(
         pl.col("team_id").cast(pl.Int64), pl.col("code").cast(pl.Int64)
     )
-    stats = stats.join(
-        teams.rename({"code": "team_code"}), on="team_id", how="left"
-    )
+    stats = stats.join(teams.rename({"code": "team_code"}), on="team_id", how="left")
     stats = stats.join(
         teams.rename({"team_id": "opponent_team_id", "code": "opponent_team_code"}),
         on="opponent_team_id",

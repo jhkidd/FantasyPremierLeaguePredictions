@@ -52,10 +52,17 @@ Choices: (1) Production (full TDD, same rigor as tasks 10/11), (2) Prototype/ide
   class TeamFixtureFactsResult:
       frame: pl.DataFrame
       rows: int
-      unresolved_teams: tuple[str, ...]   # from any Tier 2 source, before crosswalk validation fails the build
+      unresolved_teams: tuple[
+          str, ...
+      ]  # from any Tier 2 source, before crosswalk validation fails the build
 
-  def build_team_fixture_facts(season: Season, *, data_root: Path | None = None) -> pl.DataFrame | None: ...
-  def write_team_fixture_facts(season: Season, *, data_root: Path | None = None) -> TeamFixtureFactsResult: ...
+
+  def build_team_fixture_facts(
+      season: Season, *, data_root: Path | None = None
+  ) -> pl.DataFrame | None: ...
+  def write_team_fixture_facts(
+      season: Season, *, data_root: Path | None = None
+  ) -> TeamFixtureFactsResult: ...
   ```
   (Match `build_player_fixture_facts`/`write_player_fixture_facts`'s existing return-`None`-when-
   no-staged-data convention, and `FactsResult`'s `written`/`detail` pattern used elsewhere in the

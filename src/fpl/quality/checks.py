@@ -55,10 +55,11 @@ def _elo_within_validity_window_gate(*, severity: Severity = "block") -> Gate:
         if not required.issubset(frame.columns):
             missing = sorted(required - set(frame.columns))
             return [Violation(name, f"missing column(s): {missing}", severity, 0)]
+        date_fmt = "%Y-%m-%d"
         parsed = frame.with_columns(
-            pl.col("as_of_date").cast(pl.Utf8).str.to_date("%Y-%m-%d", strict=False).alias("_as_of"),
-            pl.col("valid_from").cast(pl.Utf8).str.to_date("%Y-%m-%d", strict=False).alias("_from"),
-            pl.col("valid_to").cast(pl.Utf8).str.to_date("%Y-%m-%d", strict=False).alias("_to"),
+            pl.col("as_of_date").cast(pl.Utf8).str.to_date(date_fmt, strict=False).alias("_as_of"),
+            pl.col("valid_from").cast(pl.Utf8).str.to_date(date_fmt, strict=False).alias("_from"),
+            pl.col("valid_to").cast(pl.Utf8).str.to_date(date_fmt, strict=False).alias("_to"),
         )
         bad = parsed.filter(
             pl.col("_as_of").is_not_null()

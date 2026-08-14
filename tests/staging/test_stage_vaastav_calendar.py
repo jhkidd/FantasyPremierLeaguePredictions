@@ -23,7 +23,6 @@ from fpl.staging.fixtures_from_facts import fixtures_from_player_stats
 from fpl.staging.pipeline import stage_vaastav_fixtures, stage_vaastav_teams
 from fpl.staging.vaastav import stage_fixtures_csv, stage_teams_csv
 from fpl.storage import paths
-from fpl.storage.parquet_io import write_parquet
 from fpl.storage.raw_io import RawArtifact, write_raw
 
 SEASON = Season(2021)

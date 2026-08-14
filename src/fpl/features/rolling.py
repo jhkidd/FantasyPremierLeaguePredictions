@@ -99,7 +99,11 @@ MASKED_COLUMN_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 
-_UNMASKED_LABELS: tuple[str, ...] = (*(str(w) for w in FIXTURE_WINDOWS), "season_to_date", "last_season")
+_UNMASKED_LABELS: tuple[str, ...] = (
+    *(str(w) for w in FIXTURE_WINDOWS),
+    "season_to_date",
+    "last_season",
+)
 
 
 def _sum_and_per90(values: list, minutes: list) -> tuple[float | None, float | None]:
@@ -133,8 +137,8 @@ def _masked_for_frame(
     mask = frame[mask_column].to_list()
     values = frame[column].to_list()
     minutes = frame["minutes"].to_list()
-    observed_values = [v for v, observed in zip(values, mask) if observed]
-    observed_minutes = [m for m, observed in zip(minutes, mask) if observed]
+    observed_values = [v for v, observed in zip(values, mask, strict=True) if observed]
+    observed_minutes = [m for m, observed in zip(minutes, mask, strict=True) if observed]
     masked_count = sum(1 for observed in mask if not observed)
     total, per90 = _sum_and_per90(observed_values, observed_minutes)
     return {
@@ -233,7 +237,9 @@ def build_rolling_features(
     for mask_column, columns in MASKED_COLUMN_GROUPS:
         for column in columns:
             if has_last_season:
-                features.update(_masked_for_frame(last_season_history, mask_column, column, "last_season"))
+                features.update(
+                    _masked_for_frame(last_season_history, mask_column, column, "last_season")
+                )
             else:
                 features.update(_empty_masked(column, "last_season"))
 

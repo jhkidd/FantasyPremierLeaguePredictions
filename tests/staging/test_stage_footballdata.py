@@ -42,6 +42,7 @@ class TestStageMatchesAndOdds:
         assert row["bet365_draw_odds"] == 6.0
         assert row["bet365_away_odds"] == 8.5
 
+
 class TestTwoDigitYearDates:
     """football-data.co.uk published 2016/17 with two-digit years and every
     later season with four.

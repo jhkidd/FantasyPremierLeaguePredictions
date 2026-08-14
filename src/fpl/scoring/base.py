@@ -189,9 +189,7 @@ def defensive_contribution_points(
     return 0
 
 
-def base_breakdown(
-    row: PlayerFixtureRow, *, defensive_contribution: int = 0
-) -> PointsBreakdown:
+def base_breakdown(row: PlayerFixtureRow, *, defensive_contribution: int = 0) -> PointsBreakdown:
     """Every term shared by every ruleset, assembled from one row.
 
     ``defensive_contribution`` is a parameter rather than always computed here

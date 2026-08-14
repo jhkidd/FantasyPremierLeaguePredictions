@@ -167,19 +167,20 @@ Land the table above. **Done when:** committed, and no statement in §4/§6/§11
 ```python
 @dataclass(frozen=True)
 class ColumnSpec:
-    name: str                    # our name
-    source_name: str             # theirs
+    name: str  # our name
+    source_name: str  # theirs
     dtype: pl.DataType
     required: bool = True
-    group: str = "core"          # availability group
+    group: str = "core"  # availability group
+
 
 @dataclass(frozen=True)
 class TableSpec:
-    table: str                   # e.g. "player_fixture_stats"
+    table: str  # e.g. "player_fixture_stats"
     columns: tuple[ColumnSpec, ...]
     key: tuple[str, ...]
     encoding: str = "utf-8"
-    drop: frozenset[str] = ...   # ep_next, form, xP — spec §7
+    drop: frozenset[str] = ...  # ep_next, form, xP — spec §7
 ```
 
 `stage_frame(raw, spec) -> StagedFrame` applies: decode → parse → rename → cast → drop → validate. Returns the frame plus a `StagingReport` (rows in/out, unknown columns seen, rows excluded and why).
@@ -285,15 +286,27 @@ Normalisations applied here and nowhere else:
 ```python
 @dataclass(frozen=True)
 class PointsBreakdown:
-    appearance: int; goals: int; assists: int; clean_sheet: int
-    goals_conceded: int; saves: int; penalties_saved: int
-    penalties_missed: int; yellow_cards: int; red_cards: int
-    own_goals: int; defensive_contribution: int; bonus: int
+    appearance: int
+    goals: int
+    assists: int
+    clean_sheet: int
+    goals_conceded: int
+    saves: int
+    penalties_saved: int
+    penalties_missed: int
+    yellow_cards: int
+    red_cards: int
+    own_goals: int
+    defensive_contribution: int
+    bonus: int
+
     @property
     def total(self) -> int: ...
 
+
 class Rules(Protocol):
     name: str
+
     def points(self, row: PlayerFixture) -> PointsBreakdown: ...
 ```
 

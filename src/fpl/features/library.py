@@ -30,9 +30,6 @@ import polars as pl
 
 from fpl.config import Season
 from fpl.features.rolling import (
-    FIXTURE_WINDOWS,
-    MASKED_COLUMN_GROUPS,
-    UNMASKED_COLUMNS,
     build_rolling_features,
 )
 from fpl.features.team_context import TEAM_CONTEXT_COLUMNS, build_team_context_features
@@ -143,7 +140,9 @@ def build(
     fixture_teams: dict[int, tuple[int, int]] = {
         row["fixture_id"]: (row["team_h"], row["team_a"]) for row in horizon.iter_rows(named=True)
     }
-    fixture_meta: dict[int, dict] = {row["fixture_id"]: row for row in horizon.iter_rows(named=True)}
+    fixture_meta: dict[int, dict] = {
+        row["fixture_id"]: row for row in horizon.iter_rows(named=True)
+    }
 
     player_meta = {row["player_id"]: row for row in players.iter_rows(named=True)}
 
@@ -153,12 +152,9 @@ def build(
     for player_id in player_ids:
         history = None
         if facts is not None:
-            history = (
-                facts.filter(
-                    (pl.col("player_id") == player_id) & (pl.col("kickoff_time") < as_of)
-                )
-                .sort("kickoff_time")
-            )
+            history = facts.filter(
+                (pl.col("player_id") == player_id) & (pl.col("kickoff_time") < as_of)
+            ).sort("kickoff_time")
 
         season_to_date_history = history
 

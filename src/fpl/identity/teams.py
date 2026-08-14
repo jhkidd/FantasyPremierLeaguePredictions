@@ -40,7 +40,13 @@ from fpl.storage.raw_io import read_raw
 __all__ = ["build_teams_crosswalk", "write_teams_crosswalk"]
 
 _TEAMS_CSV_SEASONS: tuple[str, ...] = (
-    "2019-20", "2020-21", "2021-22", "2022-23", "2023-24", "2024-25", "2025-26",
+    "2019-20",
+    "2020-21",
+    "2021-22",
+    "2022-23",
+    "2023-24",
+    "2024-25",
+    "2025-26",
 )
 
 _HAND_VERIFIED_CODES: dict[str, str] = {
@@ -116,15 +122,13 @@ def _season_from_players_raw(
         )
     return codes.with_columns(
         pl.lit(str(season)).alias("season"),
-        pl.col("team_code").replace_strict(code_to_name, return_dtype=pl.Utf8).alias(
-            "canonical_name"
-        ),
+        pl.col("team_code")
+        .replace_strict(code_to_name, return_dtype=pl.Utf8)
+        .alias("canonical_name"),
     ).select("season", "team_id", "team_code", "canonical_name")
 
 
-def build_teams_crosswalk(
-    seasons: list[Season], *, data_root: Path | None = None
-) -> pl.DataFrame:
+def build_teams_crosswalk(seasons: list[Season], *, data_root: Path | None = None) -> pl.DataFrame:
     """Build (season, team_id, team_code, canonical_name) for every ingested
     season, preferring teams.csv where it exists."""
     code_to_name = _code_to_name_lookup(data_root=data_root)
@@ -132,9 +136,7 @@ def build_teams_crosswalk(
     for season in sorted(seasons):
         frame = _season_from_teams_csv(season, data_root=data_root)
         if frame is None:
-            frame = _season_from_players_raw(
-                season, data_root=data_root, code_to_name=code_to_name
-            )
+            frame = _season_from_players_raw(season, data_root=data_root, code_to_name=code_to_name)
         if frame is not None:
             frames.append(frame)
     if not frames:

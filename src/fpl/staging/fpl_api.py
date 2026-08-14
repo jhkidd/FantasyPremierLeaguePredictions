@@ -264,9 +264,7 @@ def stage_availability_snapshots(
     frames: list[pl.DataFrame] = []
     reports: list[StagingReport] = []
     for body, as_of in captures:
-        staged, report = _stage_bootstrap_snapshot(
-            body, AVAILABILITY_SNAPSHOTS_SPEC, season, as_of
-        )
+        staged, report = _stage_bootstrap_snapshot(body, AVAILABILITY_SNAPSHOTS_SPEC, season, as_of)
         frames.append(staged)
         reports.append(report)
     combined = pl.concat(frames) if frames else pl.DataFrame()
@@ -365,5 +363,3 @@ def stage_manager_picks(
         pl.Series("contaminated", [r["contaminated"] for r in rows]),
     ).select(["season", "cohort", *staged.columns, "contaminated"])
     return staged, report
-
-

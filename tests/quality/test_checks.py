@@ -233,4 +233,3 @@ class TestEloWithinValidityWindowGate:
         )
         assert len(violations) == 1
         assert "valid_from" in violations[0].detail
-

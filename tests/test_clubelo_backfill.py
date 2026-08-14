@@ -36,8 +36,7 @@ from fpl.storage.parquet_io import write_parquet
 SEASON = Season(2025)
 
 RATINGS_CSV = (
-    b"Rank,Club,Country,Level,Elo,From,To\n"
-    b"1,Arsenal,ENG,1,2063.7578125,2025-05-31,2025-08-21\n"
+    b"Rank,Club,Country,Level,Elo,From,To\n1,Arsenal,ENG,1,2063.7578125,2025-05-31,2025-08-21\n"
 )
 
 
@@ -247,9 +246,7 @@ class TestBackfillIsResumable:
             data_root,
             ["2025-08-16T14:00:00Z", "2025-08-23T14:00:00Z", "2025-08-30T14:00:00Z"],
         )
-        backfill_clubelo_ratings(
-            [SEASON], connector=FakeConnector(), data_root=data_root, limit=1
-        )
+        backfill_clubelo_ratings([SEASON], connector=FakeConnector(), data_root=data_root, limit=1)
 
         second = FakeConnector()
         [outcome] = backfill_clubelo_ratings([SEASON], connector=second, data_root=data_root)

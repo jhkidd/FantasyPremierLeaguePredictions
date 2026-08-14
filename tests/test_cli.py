@@ -156,14 +156,9 @@ def test_backfill_skip_fetch_with_no_raw_data_fails_loudly_on_the_first_season(
     assert result.exit_code == exit_codes.FAILURE
 
 
-
 @pytest.mark.parametrize("layer", ["staged", "facts", "both"])
-def test_check_layer_option_is_clean_with_no_data(
-    isolated_data_root: Path, layer: str
-) -> None:
-    result = runner.invoke(
-        app, ["--data-root", str(isolated_data_root), "check", "--layer", layer]
-    )
+def test_check_layer_option_is_clean_with_no_data(isolated_data_root: Path, layer: str) -> None:
+    result = runner.invoke(app, ["--data-root", str(isolated_data_root), "check", "--layer", layer])
     assert result.exit_code == exit_codes.SUCCESS
     assert "clean" in result.output
 

@@ -43,9 +43,7 @@ class TestResolveTeams:
         )
         as_of = datetime(2026, 8, 15, tzinfo=UTC)
 
-        result, diagnostics = resolve_teams(
-            SEASON, [1], target, as_of=as_of, data_root=data_root
-        )
+        result, diagnostics = resolve_teams(SEASON, [1], target, as_of=as_of, data_root=data_root)
 
         assert result[(1, 501)] == 3
         assert diagnostics.fallback_to_current_team == (1,)
@@ -72,16 +70,12 @@ class TestResolveTeams:
         )
         as_of = datetime(2025, 8, 15, tzinfo=UTC)
 
-        result, diagnostics = resolve_teams(
-            SEASON, [1], target, as_of=as_of, data_root=data_root
-        )
+        result, diagnostics = resolve_teams(SEASON, [1], target, as_of=as_of, data_root=data_root)
 
         assert result[(1, 501)] == 3
         assert diagnostics.fallback_to_current_team == ()
 
-    def test_no_snapshot_falls_back_to_most_recent_prior_fixture_team(
-        self, tmp_path: Path
-    ) -> None:
+    def test_no_snapshot_falls_back_to_most_recent_prior_fixture_team(self, tmp_path: Path) -> None:
         data_root = tmp_path / "data"
         _write_players(
             data_root,
@@ -106,9 +100,7 @@ class TestResolveTeams:
         )
         as_of = datetime(2025, 8, 16, tzinfo=UTC)
 
-        result, diagnostics = resolve_teams(
-            SEASON, [1], target, as_of=as_of, data_root=data_root
-        )
+        result, diagnostics = resolve_teams(SEASON, [1], target, as_of=as_of, data_root=data_root)
 
         assert result[(1, 501)] == 3
         assert diagnostics.fallback_to_current_team == ()
@@ -126,9 +118,7 @@ class TestResolveTeams:
         )
         as_of = datetime(2025, 8, 10, tzinfo=UTC)
 
-        result, diagnostics = resolve_teams(
-            SEASON, [42], target, as_of=as_of, data_root=data_root
-        )
+        result, diagnostics = resolve_teams(SEASON, [42], target, as_of=as_of, data_root=data_root)
 
         assert result[(42, 501)] == 7
         assert diagnostics.fallback_to_current_team == (42,)

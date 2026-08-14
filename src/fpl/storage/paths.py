@@ -250,9 +250,4 @@ def data_features_table(season: Season, as_of: datetime, *, data_root: Path | No
     recomputed on demand (spec §4). This partition exists purely so a build
     can be inspected after the fact, mirroring ``raw_partition``'s
     ``as_of=`` naming."""
-    return (
-        _root(data_root)
-        / "features"
-        / f"season={season}"
-        / f"as_of={encode_as_of(as_of)}"
-    )
+    return _root(data_root) / "features" / f"season={season}" / f"as_of={encode_as_of(as_of)}"

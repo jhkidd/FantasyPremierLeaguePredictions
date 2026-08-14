@@ -15,12 +15,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
+from tests.features.test_library import _facts_row, _write_facts, _write_fixtures, _write_players
 
 from fpl.config import Season
 from fpl.features.library import build
 from fpl.storage import paths
 from fpl.storage.parquet_io import write_parquet
-from tests.features.test_library import _facts_row, _write_facts, _write_fixtures, _write_players
 
 SEASON = Season(2025)
 AS_OF = datetime(2025, 8, 20, tzinfo=UTC)
@@ -164,8 +164,14 @@ class TestNoLeakage:
         rolling_columns = [
             c
             for c in baseline.frame.columns
-            if c not in ("elo_rating", "opponent_elo_rating", "odds_implied_win_prob",
-                          "odds_implied_draw_prob", "odds_implied_loss_prob")
+            if c
+            not in (
+                "elo_rating",
+                "opponent_elo_rating",
+                "odds_implied_win_prob",
+                "odds_implied_draw_prob",
+                "odds_implied_loss_prob",
+            )
         ]
         assert baseline.frame.select(rolling_columns).equals(
             perturbed.frame.select(rolling_columns)

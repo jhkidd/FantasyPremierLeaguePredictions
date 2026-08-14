@@ -189,9 +189,7 @@ class TestTeamCodeIsOptional:
 
         assert facts["team_id"].null_count() == 0
 
-    def test_missing_teams_table_is_logged_with_a_row_count(
-        self, tmp_path: Path, caplog
-    ) -> None:
+    def test_missing_teams_table_is_logged_with_a_row_count(self, tmp_path: Path, caplog) -> None:
         """Silence here would let a whole season lose its cross-season key
         without anyone noticing until model training."""
         data_root = tmp_path / "data"

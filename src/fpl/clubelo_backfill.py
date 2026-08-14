@@ -104,9 +104,7 @@ def captured_dates(season: Season, *, data_root: Path | None = None) -> set[date
     treating a date as captured leaves a permanent hole in the history.
     """
     found: set[date] = set()
-    for partition in paths.iter_as_of_partitions(
-        "clubelo", "ratings", season, data_root=data_root
-    ):
+    for partition in paths.iter_as_of_partitions("clubelo", "ratings", season, data_root=data_root):
         meta_path = partition / META_FILENAME
         if not meta_path.is_file():
             continue
@@ -248,6 +246,4 @@ def total_dates_in_scope(
     seasons: Iterable[Season], *, data_root: Path | None = None
 ) -> dict[Season, int]:
     """How many rating dates each season needs — a dry-run cost estimate."""
-    return {
-        season: len(rating_dates_for_season(season, data_root=data_root)) for season in seasons
-    }
+    return {season: len(rating_dates_for_season(season, data_root=data_root)) for season in seasons}

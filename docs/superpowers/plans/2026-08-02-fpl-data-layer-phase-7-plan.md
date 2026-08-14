@@ -104,7 +104,9 @@ class ClubEloConnector:
     SOURCE = "clubelo"
 
     def fetch_ratings(self, as_of_date: date) -> bytes: ...
-    def artifact_for_ratings(self, body: bytes, as_of_date: date, season: Season) -> RawArtifact: ...
+    def artifact_for_ratings(
+        self, body: bytes, as_of_date: date, season: Season
+    ) -> RawArtifact: ...
 ```
 
 Staging (`staging/clubelo.py`): a `TableSpec` for `Rank,Club,Country,Level,Elo,From,To` (Finding: confirmed live CSV shape). `Club` is the source-name column the team crosswalk resolves against (§7.6). `Level` is retained — non-English clubs and lower-division English clubs both appear in a full daily pull, and filtering to Premier League opponents only happens at facts-assembly time (§7.7 downstream), not staging, so the staged table stays a faithful copy of what Club Elo actually published.
@@ -152,6 +154,7 @@ def url_for_season(season: Season) -> str:
     # E0 = Premier League. mmz4281/{YY}{YY+1}/E0.csv
     ...
 
+
 class FootballDataConnector:
     VERSION = "1"
     SOURCE = "footballdata"
@@ -177,8 +180,8 @@ class FootballDataOrgConnector:
     VERSION = "1"
     SOURCE = "footballdataorg"
 
-    FA_CUP_CODE = "FAC"        # confirmed against GET /v4/competitions (task 3), not assumed
-    EFL_CUP_CODE = "FLC"       # confirmed the same way — do not hardcode from a web search
+    FA_CUP_CODE = "FAC"  # confirmed against GET /v4/competitions (task 3), not assumed
+    EFL_CUP_CODE = "FLC"  # confirmed the same way — do not hardcode from a web search
 
     def __init__(self, *, fetcher=None, config=None):
         api_key = (config or Config.load()).football_data_api_key
@@ -276,10 +279,17 @@ Two real bugs were also found and fixed against live data during the historical 
 class TeamFixtureFactsResult:
     frame: pl.DataFrame
     rows: int
-    unresolved_teams: tuple[str, ...]   # from any Tier 2 source, before crosswalk validation fails the build
+    unresolved_teams: tuple[
+        str, ...
+    ]  # from any Tier 2 source, before crosswalk validation fails the build
 
-def build_team_fixture_facts(season: Season, *, data_root: Path | None = None) -> pl.DataFrame | None: ...
-def write_team_fixture_facts(season: Season, *, data_root: Path | None = None) -> TeamFixtureFactsResult: ...
+
+def build_team_fixture_facts(
+    season: Season, *, data_root: Path | None = None
+) -> pl.DataFrame | None: ...
+def write_team_fixture_facts(
+    season: Season, *, data_root: Path | None = None
+) -> TeamFixtureFactsResult: ...
 ```
 
 Columns (spec §18.5, updated 2026-08-03 — see below):

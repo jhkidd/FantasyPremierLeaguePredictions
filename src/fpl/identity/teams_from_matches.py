@@ -72,9 +72,7 @@ def _alias_to_code(crosswalk: pl.DataFrame) -> dict[str, str]:
     return mapping
 
 
-def _vote(
-    fixtures: pl.DataFrame, matches: pl.DataFrame
-) -> tuple[dict[int, Counter], int, int]:
+def _vote(fixtures: pl.DataFrame, matches: pl.DataFrame) -> tuple[dict[int, Counter], int, int]:
     """Tally, for every FPL ``team_id``, which football-data club name it
     co-occurs with across the season.
 

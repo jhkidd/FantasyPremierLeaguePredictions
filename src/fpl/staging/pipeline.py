@@ -21,8 +21,8 @@ from fpl.identity.teams_from_matches import derive_teams
 from fpl.sources.openfootball import SEASON_FILES as _OPENFOOTBALL_ENDPOINTS
 from fpl.staging.base import StagingReport
 from fpl.staging.clubelo import stage_ratings
-from fpl.staging.footballdata import stage_matches_and_odds
 from fpl.staging.fixtures_from_facts import fixtures_from_player_stats
+from fpl.staging.footballdata import stage_matches_and_odds
 from fpl.staging.fpl_api import (
     stage_availability_snapshots,
     stage_bootstrap_static,

@@ -130,9 +130,7 @@ _INPUT_COLUMNS: tuple[str, ...] = (
 )
 
 
-def write_points(
-    season: Season, rules_name: str, *, data_root: Path | None = None
-) -> PointsResult:
+def write_points(season: Season, rules_name: str, *, data_root: Path | None = None) -> PointsResult:
     """Build and write ``facts/points/rules=.../season=.../part.parquet``."""
     frame = build_points(season, rules_name, data_root=data_root)
     if frame is None:

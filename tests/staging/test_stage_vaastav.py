@@ -71,8 +71,7 @@ class TestStageMergedGw:
         assert row["recoveries"] == 3
         assert row["defensive_contribution"] == 8
         assert (
-            row["clearances_blocks_interceptions"] + row["tackles"]
-            == row["defensive_contribution"]
+            row["clearances_blocks_interceptions"] + row["tackles"] == row["defensive_contribution"]
         )
 
     def test_manager_asset_rows_are_excluded_and_counted(self) -> None:

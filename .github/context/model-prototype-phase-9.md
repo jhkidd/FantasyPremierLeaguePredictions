@@ -169,7 +169,7 @@ season.
 *partition directory name*:
 
 ```python
-as_of_date = partition_as_of(partition).date()   # staging/pipeline.py:322
+as_of_date = partition_as_of(partition).date()  # staging/pipeline.py:322
 staged = stage_ratings(body, as_of_date, season)
 ```
 

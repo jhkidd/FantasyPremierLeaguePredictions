@@ -142,9 +142,7 @@ class TestCapturesWithoutARecordedDate:
         """Partitions captured before ``params.date`` was recorded must keep
         staging — refusing them would strand data already on disk."""
         data_root = tmp_path / "data"
-        _write_capture(
-            data_root, fetched_at=datetime(2025, 8, 15, tzinfo=UTC), rating_date=None
-        )
+        _write_capture(data_root, fetched_at=datetime(2025, 8, 15, tzinfo=UTC), rating_date=None)
 
         stage_clubelo_source(SEASON, data_root=data_root)
 
@@ -160,4 +158,3 @@ class TestCapturesWithoutARecordedDate:
 
         with pytest.raises(ValueError, match="not-a-date"):
             stage_clubelo_source(SEASON, data_root=data_root)
-

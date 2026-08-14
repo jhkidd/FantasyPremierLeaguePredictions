@@ -74,9 +74,7 @@ class TestClubEloCrosswalkCoverage:
         as silently as a blank."""
         published = _clubelo_top_flight_names()
         mapped = {
-            row["clubelo_name"].strip()
-            for row in _crosswalk_rows()
-            if row["clubelo_name"].strip()
+            row["clubelo_name"].strip() for row in _crosswalk_rows() if row["clubelo_name"].strip()
         }
         assert mapped - published == set()
 
@@ -85,9 +83,7 @@ class TestClubEloCrosswalkCoverage:
         club whose fixtures will silently lose their opponent's rating."""
         published = _clubelo_top_flight_names()
         mapped = {
-            row["clubelo_name"].strip()
-            for row in _crosswalk_rows()
-            if row["clubelo_name"].strip()
+            row["clubelo_name"].strip() for row in _crosswalk_rows() if row["clubelo_name"].strip()
         }
         assert published - mapped == set()
 
@@ -95,9 +91,7 @@ class TestClubEloCrosswalkCoverage:
         """Two team codes sharing a Club Elo name would fan out the join and
         corrupt the fact table's row count."""
         names = [
-            row["clubelo_name"].strip()
-            for row in _crosswalk_rows()
-            if row["clubelo_name"].strip()
+            row["clubelo_name"].strip() for row in _crosswalk_rows() if row["clubelo_name"].strip()
         ]
         assert len(names) == len(set(names))
 

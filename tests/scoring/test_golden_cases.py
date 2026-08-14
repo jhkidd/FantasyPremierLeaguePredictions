@@ -106,18 +106,14 @@ class TestSharedTermsAcrossAllRulesets:
         """Goals conceded after a red card still cost the player — the red
         card term and the goals-conceded term are independent and both
         apply."""
-        breakdown = rules.points(
-            _row(position="DEF", minutes=90, red_cards=1, goals_conceded=4)
-        )
+        breakdown = rules.points(_row(position="DEF", minutes=90, red_cards=1, goals_conceded=4))
         assert breakdown.red_cards == -3
         assert breakdown.goals_conceded == -2
 
     def test_penalty_save_and_penalty_miss_in_the_same_match_are_independent(
         self, rules: Rules
     ) -> None:
-        breakdown = rules.points(
-            _row(position="GK", penalties_saved=1, penalties_missed=1)
-        )
+        breakdown = rules.points(_row(position="GK", penalties_saved=1, penalties_missed=1))
         assert breakdown.penalties_saved == 5
         assert breakdown.penalties_missed == -2
 
@@ -128,9 +124,7 @@ class TestSharedTermsAcrossAllRulesets:
         only via an own goal does not keep a clean sheet — but the two terms
         (clean_sheet and own_goals) are computed independently and neither
         term reaches into the other."""
-        breakdown = rules.points(
-            _row(position="GK", minutes=90, own_goals=1, goals_conceded=1)
-        )
+        breakdown = rules.points(_row(position="GK", minutes=90, own_goals=1, goals_conceded=1))
         assert breakdown.own_goals == -2
         assert breakdown.clean_sheet == 0
         assert breakdown.goals_conceded == 0

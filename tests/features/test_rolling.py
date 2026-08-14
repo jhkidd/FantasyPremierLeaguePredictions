@@ -159,12 +159,8 @@ class TestMaskedColumns:
         assert features["tackles_masked_count_last_3"] == 3
 
     def test_masked_season_to_date_and_last_season(self) -> None:
-        season_to_date = _frame(
-            [_row(cbi=1, obs_defensive=True), _row(cbi=5, obs_defensive=False)]
-        )
-        last_season = _frame(
-            [_row(cbi=2, obs_defensive=True), _row(cbi=2, obs_defensive=True)]
-        )
+        season_to_date = _frame([_row(cbi=1, obs_defensive=True), _row(cbi=5, obs_defensive=False)])
+        last_season = _frame([_row(cbi=2, obs_defensive=True), _row(cbi=2, obs_defensive=True)])
 
         features = build_rolling_features(
             _frame([]),

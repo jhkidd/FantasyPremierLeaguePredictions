@@ -45,9 +45,7 @@ def _staged_path(season: Season) -> Path:
 
 def _staged_seasons() -> list[tuple[Season, str]]:
     return [
-        (season, rules)
-        for season, rules in _SEASON_RULES.items()
-        if _staged_path(season).exists()
+        (season, rules) for season, rules in _SEASON_RULES.items() if _staged_path(season).exists()
     ]
 
 
@@ -67,9 +65,12 @@ def test_reconciles_at_zero_tolerance(season: Season, rules: str) -> None:
     mismatches = points.filter(points["total"] != points["total_points_fpl"])
     if mismatches.height:
         diff = (mismatches["total"] - mismatches["total_points_fpl"]).alias("diff")
-        worst = mismatches.with_columns(diff.abs().alias("_abs_diff")).sort(
-            "_abs_diff", descending=True
-        ).drop("_abs_diff").head(10)
+        worst = (
+            mismatches.with_columns(diff.abs().alias("_abs_diff"))
+            .sort("_abs_diff", descending=True)
+            .drop("_abs_diff")
+            .head(10)
+        )
         pytest.fail(f"{mismatches.height}/{points.height} rows mismatched.\nWorst rows:\n{worst}")
 
 

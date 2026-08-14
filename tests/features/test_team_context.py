@@ -44,9 +44,7 @@ class TestBuildTeamContextFeatures:
         data_root = tmp_path / "data"
         _write_team_fixture_facts(data_root, [_team_fixture_row()])
 
-        result = build_team_context_features(
-            SEASON, {(1, 501): 3}, data_root=data_root
-        )
+        result = build_team_context_features(SEASON, {(1, 501): 3}, data_root=data_root)
 
         features = result[(1, 501)]
         assert features["elo_rating"] == 1500.0
@@ -58,9 +56,7 @@ class TestBuildTeamContextFeatures:
         data_root = tmp_path / "data"
         _write_team_fixture_facts(data_root, [_team_fixture_row()])
 
-        result = build_team_context_features(
-            SEASON, {(1, 501): None}, data_root=data_root
-        )
+        result = build_team_context_features(SEASON, {(1, 501): None}, data_root=data_root)
 
         features = result[(1, 501)]
         assert all(features[column] is None for column in TEAM_CONTEXT_COLUMNS)
@@ -69,9 +65,7 @@ class TestBuildTeamContextFeatures:
         data_root = tmp_path / "data"
         _write_team_fixture_facts(data_root, [_team_fixture_row(team_id=99)])
 
-        result = build_team_context_features(
-            SEASON, {(1, 501): 3}, data_root=data_root
-        )
+        result = build_team_context_features(SEASON, {(1, 501): 3}, data_root=data_root)
 
         features = result[(1, 501)]
         assert all(features[column] is None for column in TEAM_CONTEXT_COLUMNS)
@@ -79,9 +73,7 @@ class TestBuildTeamContextFeatures:
     def test_no_team_fixture_facts_table_yields_all_nulls(self, tmp_path: Path) -> None:
         data_root = tmp_path / "data"
 
-        result = build_team_context_features(
-            SEASON, {(1, 501): 3}, data_root=data_root
-        )
+        result = build_team_context_features(SEASON, {(1, 501): 3}, data_root=data_root)
 
         features = result[(1, 501)]
         assert all(features[column] is None for column in TEAM_CONTEXT_COLUMNS)
