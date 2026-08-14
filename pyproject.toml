@@ -42,4 +42,11 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# 'src' makes `import fpl` work without the package being installed (though it
+# also is installed, via the project's own build-system, so this is mostly
+# belt-and-braces); '.' puts the repo root on sys.path so test modules can
+# cross-import each other as `tests.features.test_library` etc. Without this,
+# `uv run pytest` (no `-m`, unlike `python -m pytest`) never gets the repo
+# root onto sys.path and fails to collect tests/features/test_no_leakage.py.
+pythonpath = ["src", "."]
 filterwarnings = ["error"]
