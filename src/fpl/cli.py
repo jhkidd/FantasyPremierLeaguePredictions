@@ -19,6 +19,11 @@ from typing import Annotated
 import typer
 
 from fpl import __version__, exit_codes, log
+from fpl.clubelo_backfill import (
+    backfill_clubelo_ratings,
+    captured_dates,
+    total_dates_in_scope,
+)
 from fpl.config import (
     CURRENT_SEASON,
     DEFAULT_ELITE_COHORT_SIZE,
@@ -81,12 +86,15 @@ from fpl.sources.openfootball import OpenfootballConnector
 from fpl.sources.understat import UnderstatConnector
 from fpl.sources.vaastav import VaastavConnector
 from fpl.staging.pipeline import (
+    StageResult,
     stage_clubelo_source,
     stage_footballdata_source,
     stage_fpl_source,
     stage_openfootball_source,
     stage_understat_source,
+    stage_vaastav_fixtures,
     stage_vaastav_source,
+    stage_vaastav_teams,
 )
 from fpl.staging.vaastav import ERA_BY_SEASON
 from fpl.storage import paths
@@ -570,6 +578,28 @@ def _captured_event_dirs(season: Season, cohort: str, data_root: Path | None):
     ]
 
 
+def _stage_vaastav_calendar(
+    season: Season,
+    *,
+    data_root: Path | None,
+    tables: set[str] | None = None,
+) -> list[StageResult]:
+    """Stage the season's ``fixtures`` then ``teams``, in that order.
+
+    Order matters and is not interchangeable: the two earliest seasons
+    reconstruct ``fixtures`` from ``player_fixture_stats``, and ``teams`` for
+    those same seasons is then derived from that fixture calendar. Staging
+    them the other way round would silently produce nothing for 2016/17 and
+    2017/18.
+    """
+    results: list[StageResult] = []
+    if tables is None or "fixtures" in tables:
+        results += stage_vaastav_fixtures(season, data_root=data_root)
+    if tables is None or "teams" in tables:
+        results += stage_vaastav_teams(season, data_root=data_root)
+    return results
+
+
 @app.command()
 def stage(
     ctx: typer.Context,
@@ -599,6 +629,7 @@ def stage(
     else:
         try:
             results = stage_vaastav_source(parsed, data_root=_data_root(ctx))
+            results += _stage_vaastav_calendar(parsed, data_root=_data_root(ctx), tables=tables)
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
     for result in results:
@@ -858,6 +889,83 @@ def _rules_for_season(season: Season) -> str:
     return "2025-26" if season == Season(2025) else "legacy"
 
 
+@app.command("backfill-elo")
+def backfill_elo(
+    ctx: typer.Context,
+    from_season: Annotated[str, typer.Option("--from")] = "2016-17",
+    to_season: Annotated[str, typer.Option("--to")] = "2025-26",
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", help="Stop after this many fetches. Useful for a smoke test."),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Report how many dates would be fetched, then stop."),
+    ] = False,
+) -> None:
+    """Fetch historical Club Elo ratings for every matchday, then stage them.
+
+    Elo is a point-in-time rating that today's endpoint cannot reproduce for a
+    past date, so a decade of ratings needs a decade of requests — roughly
+    1,153 across ten seasons at ~7s each. The run is resumable and safe to
+    re-run: already-captured dates are skipped by reading each partition's
+    recorded rating date, and a failure on one date does not abort the rest.
+
+    Requires ``facts/player_fixture`` to exist, since the date list is derived
+    from the fixtures that actually need rating.
+    """
+    start = _parse_season(from_season)
+    end = _parse_season(to_season)
+    seasons = [s for s in sorted(ERA_BY_SEASON) if start <= s <= end]
+    if not seasons:
+        raise typer.BadParameter("no classified season falls within --from/--to")
+
+    data_root = _data_root(ctx)
+
+    if dry_run:
+        counts = total_dates_in_scope(seasons, data_root=data_root)
+        total = 0
+        for season in seasons:
+            already = len(captured_dates(season, data_root=data_root))
+            outstanding = max(counts[season] - already, 0)
+            total += outstanding
+            typer.echo(
+                f"{season}: {counts[season]} date(s) in scope, {already} captured, "
+                f"{outstanding} to fetch"
+            )
+        typer.echo(f"total: {total} date(s) to fetch, roughly {total * 7 // 60} minute(s)")
+        return
+
+    def _progress(season: Season, day: date, index: int, total: int) -> None:
+        typer.echo(f"{season}: fetching {day} ({index}/{total})")
+
+    with _source_failures():
+        outcomes = backfill_clubelo_ratings(
+            seasons, data_root=data_root, limit=limit, progress=_progress
+        )
+
+    failures = 0
+    for outcome in outcomes:
+        typer.echo(
+            f"{outcome.season}: {outcome.fetched} fetched, {outcome.skipped} already captured, "
+            f"{len(outcome.failed)} failed"
+        )
+        for day, detail in outcome.failed:
+            typer.secho(f"  {day}: {detail}", err=True, fg=typer.colors.YELLOW)
+        failures += len(outcome.failed)
+
+        for result in stage_clubelo_source(outcome.season, data_root=data_root):
+            typer.echo(f"{outcome.season} stage[{result.table}]: {result.rows} row(s)")
+
+    if failures:
+        typer.secho(
+            f"{failures} date(s) failed; re-run to retry exactly those.",
+            err=True,
+            fg=typer.colors.YELLOW,
+        )
+        raise typer.Exit(exit_codes.FAILURE)
+
+
 @app.command()
 def backfill(
     ctx: typer.Context,
@@ -904,6 +1012,12 @@ def backfill(
                 fg=typer.colors.RED,
             )
             raise typer.Exit(exit_codes.FAILURE)
+
+        # After player_fixture_stats, because 2016/17-2017/18 reconstruct
+        # their fixture calendar from it, and after that because those same
+        # seasons derive their teams table from the calendar.
+        for result in _stage_vaastav_calendar(season, data_root=data_root):
+            typer.echo(f"{season} stage[{result.table}]: {result.rows} row(s)")
 
         rules = _rules_for_season(season)
         points_result = write_points(season, rules, data_root=data_root)

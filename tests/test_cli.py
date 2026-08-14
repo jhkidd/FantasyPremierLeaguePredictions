@@ -556,3 +556,83 @@ def test_exit_codes_are_mutually_distinct() -> None:
         exit_codes.QUALITY_GATE_FAILED,
     ]
     assert len(set(codes)) == len(codes)
+
+
+class TestBackfillEloCommand:
+    """CLI surface for the historical Club Elo backfill (plan §0.6, Step 14).
+
+    The command wraps a ~1,150-request, two-hour run, so the cheap safety
+    properties — costing it before starting, refusing an empty season range,
+    and not touching the network on a dry run — are worth pinning.
+    """
+
+    def _facts(self, root: Path, kickoffs: list[str], season: str = "2016-17") -> None:
+        import polars as pl
+
+        from fpl.storage.parquet_io import write_parquet
+
+        out_dir = root / "facts" / "player_fixture" / f"season={season}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        frame = pl.DataFrame(
+            {"fixture_id": list(range(1, len(kickoffs) + 1)), "kickoff_time": kickoffs}
+        ).with_columns(
+            pl.col("kickoff_time").str.strptime(pl.Datetime(time_unit="us", time_zone="UTC"))
+        )
+        write_parquet(frame, out_dir / "part.parquet")
+
+    def test_dry_run_costs_the_work_without_fetching(self, isolated_data_root: Path) -> None:
+        """No network call is mocked here, so a dry run that touched the
+        network would fail rather than pass quietly."""
+        self._facts(isolated_data_root, ["2016-08-13T14:00:00Z", "2016-08-20T14:00:00Z"])
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "backfill-elo",
+                "--from",
+                "2016-17",
+                "--to",
+                "2016-17",
+                "--dry-run",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "2 date(s) in scope" in result.output
+        assert "2 to fetch" in result.output
+
+    def test_dry_run_with_no_facts_reports_nothing_to_do(self, isolated_data_root: Path) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "backfill-elo",
+                "--from",
+                "2016-17",
+                "--to",
+                "2016-17",
+                "--dry-run",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "0 date(s) in scope" in result.output
+
+    def test_empty_season_range_is_rejected(self, isolated_data_root: Path) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "backfill-elo",
+                "--from",
+                "2024-25",
+                "--to",
+                "2016-17",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.USAGE

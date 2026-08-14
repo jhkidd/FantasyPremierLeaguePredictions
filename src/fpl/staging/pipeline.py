@@ -8,17 +8,21 @@ belong (spec §4/§6).
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
 from fpl.config import Config, Season
+from fpl.identity.teams_from_matches import derive_teams
 from fpl.sources.openfootball import SEASON_FILES as _OPENFOOTBALL_ENDPOINTS
 from fpl.staging.base import StagingReport
 from fpl.staging.clubelo import stage_ratings
 from fpl.staging.footballdata import stage_matches_and_odds
+from fpl.staging.fixtures_from_facts import fixtures_from_player_stats
 from fpl.staging.fpl_api import (
     stage_availability_snapshots,
     stage_bootstrap_static,
@@ -31,9 +35,9 @@ from fpl.staging.openfootball import stage_fixtures as stage_openfootball_fixtur
 from fpl.staging.understat import stage_fixtures as stage_understat_fixtures
 from fpl.staging.understat import stage_league_players as stage_understat_league_players
 from fpl.staging.understat import stage_match_data as stage_understat_match_data
-from fpl.staging.vaastav import stage_merged_gw
+from fpl.staging.vaastav import stage_fixtures_csv, stage_merged_gw, stage_teams_csv
 from fpl.storage import paths
-from fpl.storage.parquet_io import write_parquet
+from fpl.storage.parquet_io import read_parquet, write_parquet
 from fpl.storage.raw_io import partition_as_of, read_raw
 
 __all__ = [
@@ -43,7 +47,9 @@ __all__ = [
     "stage_fpl_source",
     "stage_openfootball_source",
     "stage_understat_source",
+    "stage_vaastav_fixtures",
     "stage_vaastav_source",
+    "stage_vaastav_teams",
 ]
 
 _COHORTS = ("self", "mini", "elite")
@@ -297,6 +303,137 @@ def stage_vaastav_source(
     return [StageResult("player_fixture_stats", True, staged.frame.height, staged.report, detail)]
 
 
+def stage_vaastav_teams(
+    season: Season,
+    *,
+    data_root: Path | None = None,
+) -> list[StageResult]:
+    """Stage vaastav's ``teams.csv`` for one season into ``staged/teams``.
+
+    Writes the same table bootstrap-static writes, because it is the same
+    table — the archive mirrors that endpoint field-for-field. Bootstrap only
+    ever serves the *current* season, so this is the only way ``code``, the
+    one team identifier stable across seasons (plan §0.4), reaches the nine
+    completed seasons.
+    """
+    partition = paths.latest_partition("vaastav", "teams", season, data_root=data_root)
+    if partition is None:
+        return _stage_derived_teams(season, data_root=data_root)
+    body, _meta = read_raw(partition)
+    staged, report = stage_teams_csv(body, season)
+    _write(staged, "teams", season, ("team_id",), data_root=data_root)
+    return [StageResult("teams", True, staged.height, report)]
+
+
+def _stage_derived_teams(
+    season: Season,
+    *,
+    data_root: Path | None = None,
+) -> list[StageResult]:
+    """Fallback for 2016/17-2018/19, which the archive never published a
+    ``teams.csv`` for — recover ``team_id -> code`` from the fixture calendar
+    instead (see :mod:`fpl.identity.teams_from_matches`)."""
+    derived = derive_teams(season, data_root=data_root)
+    if derived is None:
+        return [
+            StageResult(
+                "teams",
+                False,
+                0,
+                None,
+                "no vaastav teams capture on disk, and no staged fixtures/"
+                "footballdata_matches_and_odds to derive one from",
+            )
+        ]
+    staged, report = derived
+    _write(staged, "teams", season, ("team_id",), data_root=data_root)
+    return [
+        StageResult(
+            "teams",
+            True,
+            staged.height,
+            report,
+            "derived from fixture/match alignment; name and strength unavailable",
+        )
+    ]
+
+
+def stage_vaastav_fixtures(
+    season: Season,
+    *,
+    data_root: Path | None = None,
+) -> list[StageResult]:
+    """Stage vaastav's ``fixtures.csv`` for one season into ``staged/fixtures``.
+
+    Falls back to reconstructing the fixture list from already-staged
+    ``player_fixture_stats`` for the two seasons the archive never published a
+    ``fixtures.csv`` for (2016/17 and 2017/18).
+    """
+    partition = paths.latest_partition("vaastav", "fixtures", season, data_root=data_root)
+    if partition is None:
+        return _stage_reconstructed_fixtures(season, data_root=data_root)
+    body, _meta = read_raw(partition)
+    staged, report = stage_fixtures_csv(body, season)
+    _write(staged, "fixtures", season, ("fixture_id",), data_root=data_root)
+    return [StageResult("fixtures", True, staged.height, report)]
+
+
+def _stage_reconstructed_fixtures(
+    season: Season,
+    *,
+    data_root: Path | None = None,
+) -> list[StageResult]:
+    stats_path = (
+        paths.staged_table("player_fixture_stats", season, data_root=data_root) / "part.parquet"
+    )
+    if not stats_path.exists():
+        return [
+            StageResult(
+                "fixtures",
+                False,
+                0,
+                None,
+                "no vaastav fixtures capture on disk, and no staged "
+                "player_fixture_stats to reconstruct one from",
+            )
+        ]
+    staged, report = fixtures_from_player_stats(read_parquet(stats_path), season)
+    _write(staged, "fixtures", season, ("fixture_id",), data_root=data_root)
+    return [
+        StageResult(
+            "fixtures", True, staged.height, report, "reconstructed from player_fixture_stats"
+        )
+    ]
+
+
+def _clubelo_rating_date(partition: Path, meta: Mapping[str, Any]) -> date:
+    """The date a Club Elo capture's ratings are *for*, not when it was fetched.
+
+    Club Elo's API is ``http://api.clubelo.com/<date>``, and the connector
+    records that date in ``meta.json`` under ``params.date``. Stamping rows
+    with the partition timestamp instead — when the fetch happened — is only
+    correct for a same-day pull. Any historical or backfilled pull is stamped
+    in the future, which makes the rating invisible to ``facts/team_fixture``
+    (it takes the latest rating at or before kickoff) and silently collapses a
+    multi-date backfill run onto a single day.
+
+    Captures written before ``params.date`` was recorded fall back to the
+    partition timestamp so data already on disk keeps staging. A *malformed*
+    recorded date raises rather than falling back: quietly substituting the
+    fetch date is precisely the bug being fixed here.
+    """
+    recorded = (meta.get("params") or {}).get("date")
+    if recorded is None:
+        return partition_as_of(partition).date()
+    try:
+        return date.fromisoformat(str(recorded))
+    except ValueError as exc:
+        raise ValueError(
+            f"clubelo capture {partition} records an unparseable params.date {recorded!r}; "
+            "refusing to fall back to the fetch date, which would silently misdate the ratings"
+        ) from exc
+
+
 def stage_clubelo_source(
     season: Season,
     *,
@@ -318,8 +455,8 @@ def stage_clubelo_source(
     frames = []
     report: StagingReport | None = None
     for partition in captures:
-        body, _meta = read_raw(partition)
-        as_of_date = partition_as_of(partition).date()
+        body, meta = read_raw(partition)
+        as_of_date = _clubelo_rating_date(partition, meta)
         staged = stage_ratings(body, as_of_date, season)
         frames.append(staged.frame)
         report = staged.report

@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import polars as pl
+
 from fpl.config import Season
-from fpl.staging.footballdata import MATCHES_AND_ODDS_SPEC, stage_matches_and_odds
+from fpl.staging.footballdata import (
+    MATCHES_AND_ODDS_SPEC,
+    parse_match_date,
+    stage_matches_and_odds,
+)
 
 SEASON = Season(2025)
 
@@ -26,7 +32,7 @@ class TestStageMatchesAndOdds:
     def test_renames_and_types_every_declared_column(self) -> None:
         result = stage_matches_and_odds(MATCH_CSV, SEASON)
         row = result.frame.row(0, named=True)
-        assert row["match_date"] == "15/08/2025"
+        assert row["match_date"] == "2025-08-15"
         assert row["home_team"] == "Liverpool"
         assert row["away_team"] == "Bournemouth"
         assert row["full_time_home_goals"] == 4
@@ -36,6 +42,37 @@ class TestStageMatchesAndOdds:
         assert row["bet365_draw_odds"] == 6.0
         assert row["bet365_away_odds"] == 8.5
 
+class TestTwoDigitYearDates:
+    """football-data.co.uk published 2016/17 with two-digit years and every
+    later season with four.
+
+    The danger is not that the old format fails to parse — it is that
+    ``%d/%m/%Y`` parses ``"13/08/16"`` as **16 AD** without complaint. The
+    column then looks fully populated while every join against it matches
+    nothing, which is exactly how 2016/17's odds went silently missing.
+    """
+
+    def test_two_digit_years_normalise_to_the_right_century(self) -> None:
+        csv = (
+            b"Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR,B365H,B365D,B365A\n"
+            b"E0,13/08/16,Burnley,Swansea,0,1,A,2.5,3.4,2.9\n"
+        )
+        result = stage_matches_and_odds(csv, Season(2016))
+        assert result.frame.row(0, named=True)["match_date"] == "2016-08-13"
+
+    def test_four_digit_years_are_unaffected(self) -> None:
+        result = stage_matches_and_odds(MATCH_CSV, SEASON)
+        assert result.frame["match_date"].to_list() == ["2025-08-15", "2025-08-16"]
+
+    def test_parse_match_date_reads_every_stored_form(self) -> None:
+        """Partitions staged before the fix still hold the published form, so
+        the reader must handle all three rather than assume the newest."""
+        frame = pl.DataFrame({"match_date": ["13/08/16", "15/08/2025", "2025-08-15"]})
+        parsed = frame.with_columns(parse_match_date(pl.col("match_date")))["match_date"]
+        assert [str(value) for value in parsed] == ["2016-08-13", "2025-08-15", "2025-08-15"]
+
+
+class TestStageMatchesAndOddsUnknownColumns:
     def test_undeclared_bookmaker_columns_are_a_warning_not_a_failure(self) -> None:
         result = stage_matches_and_odds(MATCH_CSV, SEASON)
         assert "BFDH" in result.report.unknown_columns

@@ -1,0 +1,18 @@
+{
+  "cohort": null,
+  "compressed_bytes": 11213,
+  "connector_version": "1",
+  "content_type": "csv",
+  "endpoint": "ratings",
+  "event": null,
+  "fetched_at": "2026-08-14T10:21:56.129266+00:00",
+  "http_status": 200,
+  "params": {
+    "date": "2026-02-05"
+  },
+  "raw_bytes": 35317,
+  "season": "2025-26",
+  "sha256": "dcb7a9e8a3f40f34757abae3474975c10f83239ed23e574772e056483d30e45e",
+  "source": "clubelo",
+  "url": "http://api.clubelo.com/2026-02-05"
+}

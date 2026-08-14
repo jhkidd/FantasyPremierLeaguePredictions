@@ -26,8 +26,11 @@ __all__ = [
     "ERA_BY_SEASON",
     "MERGED_GW_SPECS",
     "StagedMergedGw",
+    "encoding_for_season",
     "era_for_season",
+    "stage_fixtures_csv",
     "stage_merged_gw",
+    "stage_teams_csv",
 ]
 
 ERA_BY_SEASON: dict[Season, str] = {
@@ -403,6 +406,56 @@ def era_for_season(season: Season) -> str:
             f"no schema era classified for season {season}; "
             "classify it in fpl.staging.vaastav.ERA_BY_SEASON before staging"
         ) from None
+
+
+def encoding_for_season(season: Season) -> str:
+    """The text encoding vaastav published this season's CSVs in.
+
+    Shared by every vaastav CSV, not just ``merged_gw`` — ``fixtures.csv``
+    first appears in 2018/19, which is a cp1252 era, so a caller assuming
+    UTF-8 would mojibake or raise on it.
+    """
+    return _ENCODING_BY_ERA[era_for_season(season)]
+
+
+def _with_season(frame: pl.DataFrame, season: Season) -> pl.DataFrame:
+    """Prepend the partition's own season as a column, so a frame read in
+    isolation still says which season it belongs to."""
+    return frame.with_columns(pl.lit(str(season)).alias("season")).select(
+        ["season", *frame.columns]
+    )
+
+
+def stage_teams_csv(body: bytes, season: Season) -> tuple[pl.DataFrame, StagingReport]:
+    """Stage vaastav's per-season ``teams.csv`` against the FPL API's own spec.
+
+    The archive mirrors bootstrap-static's ``teams`` list field-for-field, so
+    the same :data:`fpl.staging.fpl_api.TEAMS_SPEC` applies unchanged. This is
+    the only route to a historical ``teams`` table: bootstrap-static serves
+    the *current* season only, so without it ``code`` — the one team
+    identifier stable across seasons (plan §0.4) — is unavailable for the
+    nine completed seasons.
+    """
+    from fpl.staging.fpl_api import TEAMS_SPEC
+
+    raw = decode_csv(body, encoding_for_season(season))
+    staged, report = stage_frame(raw, TEAMS_SPEC)
+    return _with_season(staged, season), report
+
+
+def stage_fixtures_csv(body: bytes, season: Season) -> tuple[pl.DataFrame, StagingReport]:
+    """Stage vaastav's per-season ``fixtures.csv`` against the FPL API's own spec.
+
+    As with ``teams.csv`` the archive mirrors the live ``fixtures`` endpoint,
+    so :data:`fpl.staging.fpl_api.FIXTURES_SPEC` applies unchanged — including
+    its refusal to import the nested ``stats`` blob, which duplicates what
+    ``player_fixture`` facts already carry per player.
+    """
+    from fpl.staging.fpl_api import FIXTURES_SPEC
+
+    raw = decode_csv(body, encoding_for_season(season))
+    staged, report = stage_frame(raw, FIXTURES_SPEC)
+    return _with_season(staged, season), report
 
 
 def _players_raw_lookup(body: bytes, encoding: str) -> pl.DataFrame:

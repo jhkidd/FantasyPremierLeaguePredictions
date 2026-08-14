@@ -18,6 +18,7 @@ a consumer never has to consult the era map itself.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,8 @@ import polars as pl
 from fpl.config import Season
 from fpl.storage import paths
 from fpl.storage.parquet_io import read_parquet, write_parquet
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "KEY",
@@ -86,7 +89,9 @@ _COLUMN_ORDER: tuple[str, ...] = (
     "player_id",
     "player_code",
     "team_id",
+    "team_code",
     "opponent_team_id",
+    "opponent_team_code",
     "was_home",
     "kickoff_time",
     "event",
@@ -112,19 +117,98 @@ class FactsResult:
     detail: str = ""
 
 
-def _team_id_lookup(season: Season, *, data_root: Path | None = None) -> pl.DataFrame | None:
-    """Own-team name -> FPL team id, from this season's staged ``teams`` table.
+def _derive_team_id_from_fixture(stats: pl.DataFrame, season: Season) -> pl.DataFrame:
+    """Set each row's ``team_id`` from the fixture's own opponent column.
 
-    ``merged_gw.csv`` carries the player's own team as a name string and the
-    opponent as a numeric id (an archive quirk, not a bug) — this join
-    resolves the former into the same id space as the latter. Returns
-    ``None`` (never raises) when the ``teams`` table has not been staged for
-    this season, so a facts build never depends on an unrelated source having
-    already run."""
+    A fixture is played by exactly two teams, so the distinct
+    ``opponent_team_id`` values recorded against a fixture *are* those two
+    teams — and a row's own team is whichever of the pair is not that row's
+    opponent. This needs no external table, which is the point: the previous
+    name-join depended on a ``teams`` table that only ever existed for the
+    current season, so six seasons silently resolved to all-null (plan §0.3).
+
+    It also *corrects* rather than trusts any incoming ``team_id``. The early
+    eras derived theirs from ``players_raw.csv``, an end-of-season snapshot
+    that misattributes every mid-season transfer, so the recorded value is
+    wrong for ~1,080 rows across 2016-17 to 2019-20.
+
+    Raises ``ValueError`` when a fixture names three or more distinct
+    opponents, which no real match can do and so means the source is corrupt.
+    A fixture naming only one opponent has just a single side present; its own
+    team is genuinely unknowable, so it is left null for the quality gate to
+    catch rather than guessed at.
+    """
+    teams_per_fixture = (
+        stats.select("fixture_id", "opponent_team_id")
+        .drop_nulls("opponent_team_id")
+        .unique()
+        .group_by("fixture_id")
+        .agg(pl.col("opponent_team_id").sort().alias("teams"))
+    )
+
+    overfull = teams_per_fixture.filter(pl.col("teams").list.len() > 2)
+    if overfull.height:
+        first = overfull.sort("fixture_id").row(0, named=True)
+        raise ValueError(
+            f"season {season} fixture {first['fixture_id']} names "
+            f"{len(first['teams'])} distinct opponent teams ({first['teams']}); "
+            "a fixture is played by exactly two teams, so this source is corrupt"
+        )
+
+    stats = stats.join(teams_per_fixture, on="fixture_id", how="left")
+    return stats.with_columns(
+        pl.when((pl.col("teams").list.len() == 2) & pl.col("opponent_team_id").is_not_null())
+        .then(
+            # The pair minus this row's opponent leaves exactly its own team.
+            pl.when(pl.col("teams").list.first() == pl.col("opponent_team_id"))
+            .then(pl.col("teams").list.last())
+            .otherwise(pl.col("teams").list.first())
+        )
+        .otherwise(None)
+        .cast(pl.Int64)
+        .alias("team_id")
+    ).drop("teams")
+
+
+def _with_team_codes(
+    stats: pl.DataFrame, season: Season, *, data_root: Path | None
+) -> pl.DataFrame:
+    """Attach the season-stable ``team_code`` for a row's own and opposing team.
+
+    ``team_id`` is reassigned alphabetically by FPL every season — id 3 is
+    Brighton in 2020/21, Bournemouth in 2022/23 and Burnley in 2025/26 — so it
+    cannot key anything across seasons. ``code`` can (plan §0.4).
+
+    Left null, with the reason logged, when the season's ``teams`` table is
+    absent: a facts build must not start depending on another source having
+    run first, which is precisely the coupling that produced the all-null
+    ``team_id`` bug this module was just repaired for.
+    """
     teams_path = paths.staged_table("teams", season, data_root=data_root) / "part.parquet"
     if not teams_path.exists():
-        return None
-    return read_parquet(teams_path).select(["team_id", "name"])
+        logger.warning(
+            "season %s: no staged teams table, so team_code/opponent_team_code "
+            "are null for all %d row(s); run `fpl stage vaastav` for this season",
+            season,
+            stats.height,
+        )
+        return stats.with_columns(
+            pl.lit(None, dtype=pl.Int64).alias("team_code"),
+            pl.lit(None, dtype=pl.Int64).alias("opponent_team_code"),
+        )
+
+    teams = read_parquet(teams_path).select(
+        pl.col("team_id").cast(pl.Int64), pl.col("code").cast(pl.Int64)
+    )
+    stats = stats.join(
+        teams.rename({"code": "team_code"}), on="team_id", how="left"
+    )
+    stats = stats.join(
+        teams.rename({"team_id": "opponent_team_id", "code": "opponent_team_code"}),
+        on="opponent_team_id",
+        how="left",
+    )
+    return stats
 
 
 def _with_null_column(frame: pl.DataFrame, name: str, dtype: pl.DataType) -> pl.DataFrame:
@@ -148,17 +232,6 @@ def build_player_fixture_facts(
         return None
     stats = read_parquet(stats_path)
 
-    if "team_id" not in stats.columns:
-        # E4+ carry the own-team as a name string ("team"), resolved here via
-        # the season's staged teams table. E1-E3 already resolved team_id at
-        # staging time (from players_raw's numeric team field), since they
-        # never carry a name column at all — nothing to do for them here.
-        team_lookup = _team_id_lookup(season, data_root=data_root)
-        if team_lookup is not None:
-            stats = stats.join(team_lookup, left_on="team", right_on="name", how="left")
-        else:
-            stats = stats.with_columns(pl.lit(None, dtype=pl.Int64).alias("team_id"))
-
     rename_map = {
         column: target
         for column, target in {
@@ -169,6 +242,12 @@ def build_player_fixture_facts(
     }
     if rename_map:
         stats = stats.rename(rename_map)
+
+    # Unconditional, and deliberately ignores any incoming ``team_id``: every
+    # era that ships one ships a wrong one (plan §0.3).
+    stats = _derive_team_id_from_fixture(stats, season)
+    stats = _with_team_codes(stats, season, data_root=data_root)
+
     stats = stats.with_columns(
         pl.col("kickoff_time").str.strptime(
             pl.Datetime(time_unit="us", time_zone="UTC"), strict=False

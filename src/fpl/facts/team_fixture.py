@@ -34,6 +34,7 @@ import polars as pl
 
 from fpl.config import Season
 from fpl.identity.team_external_ids import load_team_external_ids
+from fpl.staging.footballdata import parse_match_date
 from fpl.storage import paths
 from fpl.storage.parquet_io import read_parquet, write_parquet
 
@@ -115,9 +116,10 @@ def _footballdata_matches(season: Season, *, data_root: Path | None) -> pl.DataF
     if not path.exists():
         return None
     frame = read_parquet(path)
-    return frame.with_columns(
-        pl.col("match_date").str.strptime(pl.Date, format="%d/%m/%Y", strict=False)
-    )
+    # Parsed leniently rather than with one fixed format: a partition staged
+    # before the two-digit-year fix still holds ``DD/MM/YY``, which a plain
+    # ``%d/%m/%Y`` reads as year 17 without complaint.
+    return frame.with_columns(parse_match_date(pl.col("match_date")).alias("match_date"))
 
 
 def _openfootball_fixtures(season: Season, *, data_root: Path | None) -> pl.DataFrame | None:

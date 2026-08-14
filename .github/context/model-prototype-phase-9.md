@@ -812,3 +812,148 @@ modelling work.
   formula.
 - **Market data is only ever valid within its own season.** Price, ownership and transfer counts are
   collective responses to rules and must never be used as cross-season features.
+
+---
+
+## 4. Implementation addendum — Phase 0
+
+Written during execution. Records what the plan did not anticipate, so the next reader is not
+misled by a plan that reads as if it were followed exactly.
+
+### 4.1 BUG 4 — football-data.co.uk two-digit years (not in the plan; found during Step 7b)
+
+**Not one of the three bugs Phase 0 was written to fix.** football-data.co.uk publishes 2016-17 with
+two-digit years (`13/08/16`) and every later season with four (`13/08/2016`). Staging parsed with
+`%d/%m/%Y`, which does **not reject** a two-digit year — it silently parses `13/08/16` as **year 16
+AD**.
+
+This is the most dangerous defect found in the project so far, because it is *silently wrong rather
+than absent*: `null_count()` on `match_date` was zero, so every null-based quality check passed while
+every date join against that column matched nothing. It surfaced only because deriving 2016-17's team
+identities from match alignment resolved 0 of 20 clubs and refused to return a partial mapping.
+
+Fixed at staging, where the repo's own convention says source-specific quirks belong. `match_date` is
+now normalised to ISO at staging time, and `parse_match_date` was added as a lenient reader (ISO plus
+both published forms) so partitions staged before the fix still read correctly. Only 2016-17 is
+affected; audited across all ten seasons.
+
+**Lesson worth carrying:** null-rate checks cannot catch a wrong-but-populated column. The Step 13
+Elo validity-window gate is the same class of check applied deliberately — comparing a value against
+the source's own statement of what it should be, rather than merely checking it exists.
+
+### 4.2 Step 7b — deriving `teams` for the three seasons with no `teams.csv` (scope addition)
+
+The plan assumed staging vaastav's `teams.csv` would cover every season. It does not exist for
+2016-17, 2017-18 or 2018-19 (confirmed 404 live, not merely absent locally), and `fixtures.csv` does
+not exist for 2016-17 or 2017-18. Without a `teams` table `build_team_fixture_facts` returns `None`,
+so those three seasons — ~68k rows, 27% of the dataset — would have received **no elo, no odds and no
+congestion features at all**, silently.
+
+Two things were built, in a load-bearing order:
+
+1. `staging/fixtures_from_facts.py` reconstructs the fixture calendar for 2016-17/2017-18 from
+   `player_fixture_stats`.
+2. `identity/teams_from_matches.py` recovers `team_id → code` by aligning fixtures against
+   football-data.co.uk on `(kickoff date, home goals, away goals)` and taking a season-wide majority
+   vote.
+
+**Ordering is load-bearing and is encoded in `cli.py::_stage_vaastav_calendar`:**
+`player_fixture_stats` → `fixtures` → `teams`. Any other order silently yields nothing for the two
+earliest seasons.
+
+A tempting shortcut was tested and **rejected**: "FPL assigns `team_id` alphabetically" holds in only
+3 of 7 seasons with ground truth. Had it been assumed rather than checked, it would have produced
+confidently wrong mappings for four seasons.
+
+The alignment approach was validated against all 7 seasons that do have a real `teams.csv`: **20/20
+clubs exact in every one, zero unaligned fixtures.** `name`, `short_name` and `strength` are genuinely
+unrecoverable for derived seasons and are written null; only `team_id`, `code` and `season` are
+claimed, which is all `facts/team_fixture` reads.
+
+### 4.3 The `==1 opponent` case in `team_id` derivation (design decision)
+
+The plan says `_derive_team_id_from_fixture` should raise when a fixture does not have exactly two
+distinct `opponent_team_id` values. Applied literally that also raises on *one-sided* fixtures, which
+several existing synthetic tests construct legitimately.
+
+Resolved as: **raise on >2** (a genuine data corruption that must never pass silently), **leave
+`team_id` null on ==1** and let the Step 10 `fixture_has_two_teams` gate report it loudly at
+`fpl check` time. The distinction is that >2 means the invariant itself is broken, while ==1 means
+the data is merely incomplete — and incompleteness is what quality gates are for.
+
+### 4.4 A source disagreement that is not a bug
+
+Fixture 263 of 2021-22 has kickoff times 30 minutes apart between `merged_gw.csv` and `fixtures.csv`.
+This is a genuine source disagreement, not a defect: `merged_gw` records kickoff as it stood when the
+match was played, while `fixtures.csv` is an end-of-season snapshot, and that match was rescheduled.
+One row in 3,040.
+
+`tests/test_derived_calendar.py` therefore asserts `kickoff_time` to **calendar-day** granularity
+while still requiring exact equality on identity and result fields. Day granularity is what
+downstream actually consumes (T-1 elo lookup, day-based congestion windows).
+
+### 4.5 `write_raw` is unsafe for a backfill without `force=True` (Step 14)
+
+`write_raw` skips any write whose bytes hash identically to the latest partition. That is correct for
+polling a live endpoint and **destructive for a historical backfill**: Club Elo returns byte-identical
+ratings for consecutive days whenever no match was played between them, so the second date would be
+dropped, its `params.date` never recorded, and it would be re-requested on every subsequent resume
+without ever being stored.
+
+Confirmed live on the first three dates of 2016-17, which returned identical Arsenal ratings
+(`1842.85`, window 2016-08-05 → 2016-08-14). `fpl.clubelo_backfill` therefore writes with
+`force=True`, and advances `fetched_at` to the next free second when partition names would collide —
+partition directories are named to one-second resolution, and one partition per date is the invariant
+resumability depends on.
+
+### 4.6 Step 9 scope — `team_code` is joined, not required
+
+`team_code`/`opponent_team_code` are populated by joining `staged/teams`, and are left **null with a
+logged count** when that table is absent rather than failing the build. Making a facts build hard
+depend on another source having been staged first is precisely the coupling that produced the
+original all-null `team_id` bug. Verified populated at 100% across all ten seasons after Step 7b.
+
+### 4.7 BUG 5 — the ClubElo name crosswalk only covered the current twenty clubs (found at Step 16)
+
+**Also not one of the bugs Phase 0 was written to fix**, and it would have survived the whole phase
+unnoticed had the backfill not made elo populated enough to inspect.
+
+`data/crosswalk/team_external_ids.csv` had `clubelo_name` filled in for the twenty clubs in the
+*current* Premier League only. Every relegated or since-promoted club — Leicester, Southampton,
+Ipswich, Hull, Swansea, Stoke, Watford, Cardiff, Norwich, Middlesbrough, West Brom, Huddersfield,
+Sheffield United, Luton — was blank, so those clubs resolved to no rating at all in every season they
+played.
+
+The signature was distinctive once the run finished: post-backfill `elo_rating` null rates came out
+as exact multiples of 5% (40%, 35%, 25%, 20%, 15%, 10%, 0%), and 5% of a 760-row season is exactly
+38 rows — one club's entire campaign. Whole clubs were missing, not scattered dates, which is what
+distinguished it from a residual date-coverage problem.
+
+Club Elo lists exactly 34 English level-1 clubs across the ten seasons, and the crosswalk has exactly
+34 team codes, so the mapping is 1:1 and every missing name matched Club Elo's published string
+verbatim. `tests/test_clubelo_crosswalk_coverage.py` now pins the mapping in both directions —
+no blank names, no name Club Elo does not publish, no top-flight club left unmapped, and no duplicate
+names — so a future promoted club reintroducing the gap fails a test rather than quietly costing a
+season 5% of its elo coverage.
+
+### 4.8 Phase 0 outcome
+
+Measured before and after, across all ten seasons (253,509 player-fixture rows, 7,600 team-fixture
+rows):
+
+| Field | Before | After |
+| --- | --- | --- |
+| `player_fixture.team_id` null | 155,000 (61%) | **0** |
+| `player_fixture.team_id` wrong | 1,080 | **0** |
+| `player_fixture.team_code` | column did not exist | **0 null** |
+| `team_fixture` seasons built | 1 of 10 | **10 of 10** |
+| `team_fixture.elo_rating` null | 100% | **0%** |
+| `team_fixture.opponent_elo_rating` null | 100% | **0%** |
+| `team_fixture.odds_implied_*` null | unproven | **0%** |
+| `clubelo_ratings` rating dates | 1 | **1,150** |
+| `footballdata.match_date` (2016-17) | parsed as years 16–17 AD | **correct ISO** |
+
+Five defects were found and fixed; the plan anticipated three. The two it did not anticipate (§4.1,
+§4.7) were both *silently wrong rather than absent*, and neither would have been caught by a null-rate
+check. Both were found only by comparing a value against an independent statement of what it should
+have been — match alignment in one case, the source's own validity window and club list in the other.

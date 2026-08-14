@@ -19,6 +19,7 @@ from fpl.quality.gates import (
     enum_values,
     in_range,
     non_negative,
+    not_null,
     run_gates,
     unique_key,
 )
@@ -32,6 +33,53 @@ __all__ = [
     "check_staged_table",
     "check_staged_tables",
 ]
+
+
+def _elo_within_validity_window_gate(*, severity: Severity = "block") -> Gate:
+    """``as_of_date`` falls inside the rating's own ``valid_from``/``valid_to``.
+
+    Club Elo states, per row, the span of days a rating describes. That makes
+    it a self-checking source: if the date we stamped a rating with sits
+    outside the window the source itself published, we have misdated it.
+
+    This gate exists because the original bug (plan §0.5) stamped ratings with
+    the *fetch* date instead of the requested one — invisible to every
+    null-based check, since the column was fully populated and merely wrong.
+    Every row landing months outside its own window would have caught it on
+    the first run.
+    """
+    name = "elo_within_validity_window"
+
+    def check(frame: pl.DataFrame) -> list[Violation]:
+        required = {"as_of_date", "valid_from", "valid_to"}
+        if not required.issubset(frame.columns):
+            missing = sorted(required - set(frame.columns))
+            return [Violation(name, f"missing column(s): {missing}", severity, 0)]
+        parsed = frame.with_columns(
+            pl.col("as_of_date").cast(pl.Utf8).str.to_date("%Y-%m-%d", strict=False).alias("_as_of"),
+            pl.col("valid_from").cast(pl.Utf8).str.to_date("%Y-%m-%d", strict=False).alias("_from"),
+            pl.col("valid_to").cast(pl.Utf8).str.to_date("%Y-%m-%d", strict=False).alias("_to"),
+        )
+        bad = parsed.filter(
+            pl.col("_as_of").is_not_null()
+            & (
+                (pl.col("_from").is_not_null() & (pl.col("_as_of") < pl.col("_from")))
+                | (pl.col("_to").is_not_null() & (pl.col("_as_of") > pl.col("_to")))
+            )
+        ).drop(["_as_of", "_from", "_to"])
+        if bad.height == 0:
+            return []
+        return [
+            Violation(
+                name,
+                f"{bad.height} rating(s) stamped outside their own validity window",
+                severity,
+                bad.height,
+                tuple(bad.head(5).to_dicts()),
+            )
+        ]
+
+    return Gate(name, check)
 
 
 STAGED_TABLE_GATES: dict[str, list[Gate]] = {
@@ -54,6 +102,10 @@ STAGED_TABLE_GATES: dict[str, list[Gate]] = {
         unique_key(["player_id", "fixture_id"]),
         in_range("minutes", minimum=0, maximum=120),
         non_negative("goals_scored"),
+    ],
+    "clubelo_ratings": [
+        unique_key(["as_of_date", "club"]),
+        _elo_within_validity_window_gate(),
     ],
 }
 
@@ -153,10 +205,84 @@ def _obs_constant_within_season_gate(*, severity: Severity = "block") -> Gate:
     return Gate(name, check)
 
 
+def _fixture_has_two_teams_gate(*, severity: Severity = "block") -> Gate:
+    """Every fixture names exactly two distinct opponents (plan §0.3).
+
+    This is the invariant the whole ``team_id`` derivation rests on: a row's
+    own team is whichever of a fixture's two teams is not that row's opponent.
+    It held for all 3,800 fixtures across ten seasons, but if a future season
+    ever breaks it the failure mode is *silent misattribution* rather than a
+    missing value, so it is asserted at ``fpl check`` time rather than assumed.
+    """
+    name = "fixture_has_two_teams"
+
+    def check(frame: pl.DataFrame) -> list[Violation]:
+        required = {"fixture_id", "opponent_team_id"}
+        if not required.issubset(frame.columns):
+            missing = sorted(required - set(frame.columns))
+            return [Violation(name, f"missing column(s): {missing}", severity, 0)]
+        counts = (
+            frame.filter(pl.col("opponent_team_id").is_not_null())
+            .group_by("fixture_id")
+            .agg(pl.col("opponent_team_id").n_unique().alias("teams"))
+        )
+        bad = counts.filter(pl.col("teams") != 2).sort("fixture_id")
+        if bad.height == 0:
+            return []
+        return [
+            Violation(
+                name,
+                f"{bad.height} fixture(s) do not have exactly two distinct opponent_team_id",
+                severity,
+                bad.height,
+                tuple(bad.head(5).to_dicts()),
+            )
+        ]
+
+    return Gate(name, check)
+
+
+def _team_is_not_its_own_opponent_gate(*, severity: Severity = "block") -> Gate:
+    """No row has ``team_id == opponent_team_id`` (plan §0.3).
+
+    Nulls are ignored deliberately — ``not_null("team_id")`` owns that case,
+    and two gates reporting the same defect makes a failure log harder to act
+    on than one that reports it once.
+    """
+    name = "team_is_not_its_own_opponent"
+
+    def check(frame: pl.DataFrame) -> list[Violation]:
+        required = {"team_id", "opponent_team_id"}
+        if not required.issubset(frame.columns):
+            missing = sorted(required - set(frame.columns))
+            return [Violation(name, f"missing column(s): {missing}", severity, 0)]
+        bad = frame.filter(
+            pl.col("team_id").is_not_null()
+            & pl.col("opponent_team_id").is_not_null()
+            & (pl.col("team_id") == pl.col("opponent_team_id"))
+        )
+        if bad.height == 0:
+            return []
+        return [
+            Violation(
+                name,
+                f"{bad.height} row(s) where team_id equals opponent_team_id",
+                severity,
+                bad.height,
+                tuple(bad.head(5).to_dicts()),
+            )
+        ]
+
+    return Gate(name, check)
+
+
 FACTS_TABLE_GATES: dict[str, list[Gate]] = {
     "player_fixture": [
         unique_key(["season", "fixture_id", "player_id"]),
         in_range("minutes", minimum=0, maximum=120),
+        not_null("team_id"),
+        _fixture_has_two_teams_gate(),
+        _team_is_not_its_own_opponent_gate(),
         _no_scoreless_appearance_gate(),
         _defensive_contribution_formula_gate(),
         _obs_constant_within_season_gate(),
