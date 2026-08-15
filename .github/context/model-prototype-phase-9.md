@@ -755,6 +755,25 @@ deliberately left out earlier and should be revisited here.
 | **FPL-Optimization-Tools** (sertalpbilal) | FPL as multi-period MILP, taking exogenous expected-points vectors | Composes directly with our predictions — the squad-selection layer. |
 | **FPL Review Massive Data Model** | Commercial; uses betting odds and predicted lineups | The accuracy bar. Our odds features already exist after Phase 0; predicted lineups do not. |
 
+**OpenFPL's published head-to-head RMSE** (trained 2020-21..2023-24, tested prospectively on
+2024-25 — the same train/evaluate shape as this repo's own Split B), from
+[the OpenFPL repo's README](https://github.com/daniegr/OpenFPL):
+
+| Bucket (OpenFPL's own cutoffs) | OpenFPL RMSE | FPL Review RMSE |
+| --- | --- | --- |
+| Zeros (0 pts) | 0.82 | **0.69** |
+| Blanks (≤2 pts) | 1.29 | **1.19** |
+| Tickers (3-4 pts) | **1.52** | 1.59 |
+| Haulers (≥5 pts) | **5.14** | 5.17 |
+
+**Not directly comparable to Section 6/Step 32's own bucket RMSEs** — this plan's buckets (zeros=0,
+blanks=1-3, tickers=4-8, haulers=9+, per Q10) use different cutoffs than OpenFPL's own
+(zeros=0/non-playing, blanks≤2, tickers=3-4, haulers≥5) — but it is the closest published reference
+point for judging whether a future candidate model is closing the gap to state-of-the-art. The
+current Step 28-31 GLM baseline's hauler-bucket RMSE (9.09, `docs/model-prototype-baseline.md`
+Section 4) is well above this table even accounting for the higher threshold, which is expected for a
+first, untuned linear baseline with no Understat xG/xA yet (§3.1).
+
 Concrete candidates to train and compare: gradient-boosted trees (LightGBM / XGBoost — note these
 handle NaN natively, so the era-masked features excluded from the Phase A baseline become usable),
 random forests, and a hierarchical Bayesian Poisson model. Tree models also remove the need for
