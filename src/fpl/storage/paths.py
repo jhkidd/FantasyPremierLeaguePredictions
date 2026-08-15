@@ -18,6 +18,7 @@ from fpl.config import Config, Season
 __all__ = [
     "chunk_partition",
     "crosswalk_file",
+    "data_eda_dir",
     "data_features_table",
     "data_training_matrix",
     "decode_as_of",
@@ -261,3 +262,12 @@ def data_training_matrix(*, data_root: Path | None = None) -> Path:
     ``fpl dataset`` — ``.gitignore``d rather than committed, unlike
     everything else under ``data/`` (plan Phase A, Step 19)."""
     return _root(data_root) / "training" / "matrix.parquet"
+
+
+def data_eda_dir(*, data_root: Path | None = None) -> Path:
+    """Where ``fpl eda`` writes its figures: ``data/eda/``.
+
+    Unlike ``data/training/``, these figures *are* committed — they are the
+    small, reviewable evidence behind ``docs/model-prototype-eda.md`` (plan
+    Phase A, Step 26/27), not a large trivially-rebuilt intermediate."""
+    return _root(data_root) / "eda"

@@ -36,6 +36,7 @@ def test_help_lists_the_intended_surface() -> None:
         "check",
         "features",
         "dataset",
+        "eda",
         "backfill",
     ):
         assert command in result.output
@@ -676,6 +677,150 @@ class TestDatasetCommand:
         assert "1 row(s) across 1 season(s)" in result.output
         matrix_path = isolated_data_root / "training" / "matrix.parquet"
         assert matrix_path.is_file()
+
+
+class TestEdaCommand:
+    """CLI surface for Step 27: the EDA statistical sweep, plots, and
+    ``docs/model-prototype-eda.md`` report."""
+
+    def _facts(self, root: Path, season: str, n_events: int) -> None:
+        import polars as pl
+
+        from fpl.storage.parquet_io import write_parquet
+
+        columns = [
+            "season",
+            "fixture_id",
+            "player_id",
+            "player_code",
+            "team_id",
+            "team_code",
+            "opponent_team_id",
+            "opponent_team_code",
+            "was_home",
+            "kickoff_time",
+            "event",
+            "position",
+            "minutes",
+            "starts",
+            "goals_scored",
+            "assists",
+            "goals_conceded",
+            "own_goals",
+            "penalties_saved",
+            "penalties_missed",
+            "yellow_cards",
+            "red_cards",
+            "saves",
+            "cbi",
+            "tackles",
+            "recoveries",
+            "defensive_contribution",
+            "attempted_passes",
+            "completed_passes",
+            "key_passes",
+            "big_chances_created",
+            "big_chances_missed",
+            "open_play_crosses",
+            "dribbles",
+            "tackled",
+            "fouls",
+            "offside",
+            "target_missed",
+            "errors_leading_to_goal",
+            "errors_leading_to_goal_attempt",
+            "penalties_conceded",
+            "winning_goals",
+            "expected_goals",
+            "expected_assists",
+            "expected_goal_involvements",
+            "expected_goals_conceded",
+            "total_points_fpl",
+            "bonus_fpl",
+            "bps_fpl",
+            "obs_defensive",
+            "obs_bps_inputs",
+            "obs_expected",
+            "obs_starts",
+        ]
+        full_rows = []
+        for event in range(1, n_events + 1):
+            full_row: dict = dict.fromkeys(columns, 0)
+            full_row.update(
+                {
+                    "season": season,
+                    "player_code": "code-1",
+                    "was_home": event % 2 == 0,
+                    "position": "MID",
+                    "obs_defensive": True,
+                    "obs_bps_inputs": True,
+                    "obs_expected": True,
+                    "obs_starts": True,
+                    "fixture_id": event,
+                    "player_id": 1,
+                    "event": event,
+                    "kickoff_time": f"2016-08-{13 + event:02d}T14:00:00",
+                    "minutes": 90 if event % 3 else 0,
+                    "goals_scored": event % 2,
+                    "total_points_fpl": event,
+                }
+            )
+            full_rows.append(full_row)
+
+        frame = pl.DataFrame(full_rows).with_columns(
+            pl.col("kickoff_time").str.strptime(pl.Datetime(time_unit="us", time_zone="UTC"))
+        )
+        out_dir = root / "facts" / "player_fixture" / f"season={season}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_parquet(frame, out_dir / "part.parquet")
+
+    def test_no_matrix_available_reports_nothing_to_analyse(
+        self, isolated_data_root: Path, tmp_path: Path
+    ) -> None:
+        report_path = tmp_path / "report.md"
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "eda",
+                "--report-path",
+                str(report_path),
+            ],
+        )
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "skipped" in result.output
+        assert not report_path.exists()
+
+    def test_builds_report_and_figures_from_available_season(
+        self, isolated_data_root: Path, tmp_path: Path
+    ) -> None:
+        self._facts(isolated_data_root, "2016-17", 12)
+        report_path = tmp_path / "docs" / "model-prototype-eda.md"
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "eda",
+                "--report-path",
+                str(report_path),
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert "training row(s) analysed" in result.output
+        assert report_path.is_file()
+        report_text = report_path.read_text(encoding="utf-8")
+        assert "Feature type classification" in report_text
+        assert "high-correlation pairs" in report_text.lower()
+
+        eda_dir = isolated_data_root / "eda"
+        assert eda_dir.is_dir()
+        assert any(eda_dir.glob("target_distribution_*.png"))
+        assert (eda_dir / "correlation_heatmap_pearson.png").is_file()
+        assert (eda_dir / "missingness_by_season.png").is_file()
 
 
 class TestBackfillEloCommand:

@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 
+import polars as pl
 import typer
 
 from fpl import __version__, exit_codes, log
@@ -36,6 +37,7 @@ from fpl.facts.player_fixture import write_player_fixture_facts
 from fpl.facts.points import write_points
 from fpl.facts.team_fixture import write_team_fixture_facts
 from fpl.features import library as features_library
+from fpl.features.team_context import TEAM_CONTEXT_COLUMNS
 from fpl.identity.players import (
     build_players_crosswalk,
     unmapped_players_with_minutes,
@@ -98,9 +100,18 @@ from fpl.staging.pipeline import (
 )
 from fpl.staging.vaastav import ERA_BY_SEASON
 from fpl.storage import paths
-from fpl.storage.parquet_io import write_parquet
+from fpl.storage.parquet_io import read_parquet, write_parquet
 from fpl.storage.raw_io import write_raw
-from fpl.training.dataset import build_training_matrix
+from fpl.training.dataset import LABEL_COLUMNS, build_training_matrix
+from fpl.training.eda import run_eda_sweep
+from fpl.training.eda_plots import (
+    plot_correlation_heatmap,
+    plot_feature_histograms,
+    plot_missingness_by_season,
+    plot_target_distribution,
+)
+from fpl.training.eda_report import render_eda_report
+from fpl.training.splits import chronological_split
 from fpl.understat_capture import capture_league_data, capture_match_data
 
 app = typer.Typer(
@@ -891,13 +902,7 @@ def dataset(ctx: typer.Context) -> None:
     built yet — the same "missing is a normal, expected state" contract
     every other ``facts``-reading command in this CLI already follows."""
     data_root = _data_root(ctx)
-    seasons = [
-        season
-        for season in sorted(ERA_BY_SEASON)
-        if (
-            paths.facts_table("player_fixture", season, data_root=data_root) / "part.parquet"
-        ).exists()
-    ]
+    seasons = _seasons_with_built_facts(data_root)
     if not seasons:
         typer.echo("dataset: skipped, no facts/player_fixture built for any season yet")
         return
@@ -910,6 +915,112 @@ def dataset(ctx: typer.Context) -> None:
 
     typer.echo(
         f"dataset: {matrix.height} row(s) across {len(seasons)} season(s) written to {out_path}"
+    )
+
+
+_DEFAULT_EDA_REPORT_PATH = Path(__file__).resolve().parents[2] / "docs" / "model-prototype-eda.md"
+
+
+def _seasons_with_built_facts(data_root: Path | None) -> list[Season]:
+    """Every season with a built ``facts/player_fixture`` table, in order —
+    the shared "what can we train on right now" contract for ``dataset``,
+    ``eda`` and (later) ``baseline``."""
+    return [
+        season
+        for season in sorted(ERA_BY_SEASON)
+        if (
+            paths.facts_table("player_fixture", season, data_root=data_root) / "part.parquet"
+        ).exists()
+    ]
+
+
+def _load_or_build_training_matrix(data_root: Path | None) -> pl.DataFrame | None:
+    """Load the cached ``data/training/matrix.parquet`` if ``fpl dataset``
+    has already written one, otherwise build it in memory from every season
+    with built facts (without writing it to disk). Returns ``None`` if there
+    is nothing to build from at all."""
+    matrix_path = paths.data_training_matrix(data_root=data_root)
+    if matrix_path.exists():
+        return read_parquet(matrix_path)
+    seasons = _seasons_with_built_facts(data_root)
+    if not seasons:
+        return None
+    return build_training_matrix(seasons, data_root=data_root)
+
+
+def _curated_eda_columns(frame: pl.DataFrame) -> list[str]:
+    """A tractable, representative numeric-feature subset for VIF and
+    plotting: the deepest fixed rolling window's per-90 rate — one
+    representation per underlying stat, rather than every window x
+    sum/per90 combination — plus every team-context column present. A full
+    VIF or one histogram per one of ~470 mutually-derived columns would be
+    both computationally infeasible and unreadable."""
+    rolling = sorted(c for c in frame.columns if c.endswith("_per90_last_10"))
+    team_context = [c for c in TEAM_CONTEXT_COLUMNS if c in frame.columns]
+    return rolling + team_context
+
+
+@app.command()
+def eda(
+    ctx: typer.Context,
+    report_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--report-path", help="Override the markdown report output path (for testing)."
+        ),
+    ] = None,
+) -> None:
+    """Run the Step 25-26 EDA statistical sweep and plots over the
+    chronological training split **only**, and write the figures to
+    ``data/eda/`` plus a markdown report to ``docs/model-prototype-eda.md``.
+
+    Builds/loads the training matrix the same way ``fpl dataset`` does if
+    ``data/training/matrix.parquet`` is not already present."""
+    data_root = _data_root(ctx)
+    matrix = _load_or_build_training_matrix(data_root)
+    if matrix is None:
+        typer.echo("eda: skipped, no training matrix available yet (run `fpl dataset` first)")
+        return
+
+    train, _validation, _test = chronological_split(matrix)
+    if train.height == 0:
+        typer.echo("eda: skipped, chronological training split is empty")
+        return
+
+    curated_columns = _curated_eda_columns(train)
+    result = run_eda_sweep(train, vif_columns=curated_columns)
+
+    eda_dir = paths.data_eda_dir(data_root=data_root)
+    eda_dir.mkdir(parents=True, exist_ok=True)
+
+    histogram_paths = plot_feature_histograms(train, curated_columns, eda_dir)
+    target_distribution_paths = {
+        label: plot_target_distribution(train, label, eda_dir) for label in LABEL_COLUMNS
+    }
+    correlation_heatmap_paths = {
+        "pearson": plot_correlation_heatmap(result.pearson, eda_dir, name="pearson"),
+        "spearman": plot_correlation_heatmap(result.spearman, eda_dir, name="spearman"),
+    }
+    missingness_path = plot_missingness_by_season(train, curated_columns, eda_dir)
+
+    resolved_report_path = report_path or _DEFAULT_EDA_REPORT_PATH
+    resolved_report_path.parent.mkdir(parents=True, exist_ok=True)
+    markdown = render_eda_report(
+        result,
+        train_row_count=train.height,
+        train_seasons=sorted(train["season"].unique().to_list()),
+        curated_columns=curated_columns,
+        histogram_paths=histogram_paths,
+        target_distribution_paths=target_distribution_paths,
+        correlation_heatmap_paths=correlation_heatmap_paths,
+        missingness_path=missingness_path,
+        report_path=resolved_report_path,
+    )
+    resolved_report_path.write_text(markdown, encoding="utf-8")
+
+    typer.echo(
+        f"eda: {train.height} training row(s) analysed, report written to "
+        f"{resolved_report_path}, figures written to {eda_dir}"
     )
 
 

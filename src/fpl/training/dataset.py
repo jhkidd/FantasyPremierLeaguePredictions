@@ -37,7 +37,7 @@ from fpl.storage import paths
 from fpl.storage.parquet_io import read_parquet
 from fpl.training.deadlines import gameweek_deadlines
 
-__all__ = ["IDENTITY_COLUMNS", "LABEL_COLUMNS", "build_training_matrix"]
+__all__ = ["IDENTITY_COLUMNS", "LABEL_COLUMNS", "OBS_COLUMNS", "build_training_matrix"]
 
 IDENTITY_COLUMNS: tuple[str, ...] = (
     "season",
@@ -51,7 +51,7 @@ IDENTITY_COLUMNS: tuple[str, ...] = (
     "opponent_team_code",
 )
 
-_OBS_COLUMNS: tuple[str, ...] = ("obs_defensive", "obs_bps_inputs", "obs_expected", "obs_starts")
+OBS_COLUMNS: tuple[str, ...] = ("obs_defensive", "obs_bps_inputs", "obs_expected", "obs_starts")
 
 # label name -> source column on facts/player_fixture. Identical for every
 # label except `bonus` (facts stores it `bonus_fpl`, mirroring
@@ -95,7 +95,7 @@ def _player_fixture_facts(season: Season, *, data_root: Path | None) -> pl.DataF
 def _empty_matrix() -> pl.DataFrame:
     schema = {
         **{column: pl.Utf8 for column in IDENTITY_COLUMNS},
-        **{column: pl.Boolean for column in _OBS_COLUMNS},
+        **{column: pl.Boolean for column in OBS_COLUMNS},
         **{column: pl.Float64 for column in LABEL_COLUMNS},
     }
     return pl.DataFrame(schema=schema)
@@ -141,7 +141,7 @@ def _build_one_season(season: Season, *, data_root: Path | None) -> pl.DataFrame
 
                 assembled: dict = {column: row[column] for column in IDENTITY_COLUMNS}
                 assembled["as_of"] = as_of
-                for column in _OBS_COLUMNS:
+                for column in OBS_COLUMNS:
                     assembled[column] = row[column]
                 assembled.update(rolling_features)
                 for label, source in _LABEL_SOURCE_COLUMNS.items():
