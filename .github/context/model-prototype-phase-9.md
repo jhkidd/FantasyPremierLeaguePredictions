@@ -957,3 +957,154 @@ Five defects were found and fixed; the plan anticipated three. The two it did no
 §4.7) were both *silently wrong rather than absent*, and neither would have been caught by a null-rate
 check. Both were found only by comparing a value against an independent statement of what it should
 have been — match alignment in one case, the source's own validity window and club list in the other.
+
+---
+
+## 5. Implementation addendum — Phase A
+
+Written during execution of Steps 25–32. Records where the implementation diverged from or refined
+the plan's prose, so the next reader is not misled by a plan that reads as if it were followed
+exactly.
+
+### 5.1 EDA sweep (Step 25) — sampling and approximation choices
+
+- **Correlation matrices use pairwise-complete correlation** (`numpy.ma.corrcoef` on masked-invalid
+  arrays), not list-wise-complete: dropping any row with a null in *any* of ~470 columns would drop
+  almost the entire training set, since early-history rows are systematically null across many
+  columns at once. Spearman reduces to the same routine on per-column independent ranks
+  (`scipy.stats.rankdata` on each column's own non-null subset).
+- **VIF is computed manually** via `sklearn.linear_model.LinearRegression`'s `1/(1-R²)` rather than
+  adding `statsmodels` as a new dependency. It is list-wise-complete (VIF needs a shared design
+  matrix) and row-subsampled (`sample_size=5000` default) for tractability — a full VIF over ~470
+  mutually-derived, highly-redundant columns is computationally infeasible without a curated column
+  subset, which the caller (the `fpl eda` CLI) supplies.
+- **Mutual information** (`sklearn.feature_selection.mutual_info_regression`) uses median-imputation
+  for nulls (diagnostic-only, never touches the modelling pipeline) and the same row-subsampling as
+  VIF.
+- **`missing_value_report`'s era breakdown** uses each row's *own* `obs_*` flag as a proxy for the
+  governing era, rather than exact per-window provenance (a rolling window can straddle an era
+  boundary). Documented as an approximation and judged acceptable for a diagnostic report.
+
+### 5.2 The `P(play)` proxy (Step 29)
+
+The plan specifies exactly one minutes model (`Ridge`, a continuous regression), not a separate
+logistic/binary "did they play" classifier, so `P(play) × E[stat | play]` has no literal second model
+to multiply by. Resolved as `P(play) = clip(predicted_minutes / 90, 0, 1)` — a continuous relaxation
+of the binary play indicator — multiplied against each Poisson component's prediction. This is a
+judgment call, not something the plan's Q&A settles explicitly.
+
+### 5.3 All-null-feature-column drop in `fit_glm_baseline` (Step 29)
+
+Any feature column with zero observed values in the training split is dropped before fitting, rather
+than left for `SimpleImputer` to silently drop with only a `UserWarning` — keeping the bundle's
+recorded `feature_columns` accurate to what was actually fit on. A real-world-relevant case: some
+team-context/engineered features are genuinely all-null for early seasons or small subsets.
+
+### 5.4 `assemble_predicted_points` reuses the real production ruleset objects (Step 30)
+
+Rather than reimplementing scoring arithmetic, `assemble_predicted_points` calls
+`fpl.facts.ruleset_for_name(...).points(row).total` directly on assembled predicted rows — the most
+literal, DRY reading of "sum through the season's own ruleset," and it means any future scoring-rule
+change propagates to the baseline evaluation automatically. The training matrix's single
+`defensive_contribution` column is already the position-dependent combined sum
+(`cbi+tackles` for DEF, `cbi+tackles+recoveries` for MID/FWD — confirmed via
+`quality/checks.py`'s `_defensive_contribution_formula_gate`), so it is passed as
+`PlayerFixtureRow.cbi` with `tackles=0, recoveries=0`; `defensive_contribution_points`'s threshold
+check on that combined value is mathematically identical to checking the three real components
+separately. Validated by the plan's own required unit test: a perfect component prediction reproduces
+the realised `total_points_fpl` exactly, across all three rulesets (legacy/2025-26/2026-27).
+
+### 5.5 The naive baseline is an independent reimplementation, not a reuse of `rolling.py` (Step 28)
+
+`naive_rolling_mean_predictions` operates directly on the training matrix's own `label_<target>`
+columns rather than reusing `rolling.py`'s `sum_last_N`/`per90_last_N` columns, which don't exist for
+`bonus_fpl`/`total_points_fpl` and would require deriving an exact "fixtures in window" count not
+currently stored anywhere. This keeps it consistent with a pre-existing quirk, deliberately not
+touched: `dataset.py`'s `_build_one_season` resets `history_so_far` at the start of every season, so
+the fixed 3/5/10-fixture rolling windows never actually span season boundaries despite `rolling.py`'s
+own docstring implying they do. The naive baseline matches this actual (not documented-ideal)
+behaviour rather than fixing an already-committed, already-tested Step 21 quirk out of scope.
+
+### 5.6 CLI "skip" vs library "raise" divergence (Steps 27/29/31 vs Step 21)
+
+`build_training_matrix` (the library function) **raises** `FileNotFoundError`/`ValueError` when asked
+to build a season whose `facts/player_fixture` has not been built, or whose fixture windows overlap —
+both propagate as-is from `deadlines.gameweek_deadlines`. The `dataset`/`eda`/`baseline` CLI commands
+never let that exception surface: each pre-filters to `_seasons_with_built_facts` first and, if
+nothing is built yet, echoes `"<command>: skipped, ..."` and returns cleanly (exit 0) — matching this
+repo's established "missing is a normal, expected state" contract for every `facts`-reading command.
+This is deliberate layering, not an inconsistency: the library is strict because a direct caller has
+stated explicit intent about which seasons it wants; the CLI is lenient because "no data built yet" is
+an ordinary, expected state for an interactively-run command, not a caller error.
+
+### 5.7 Real bugs found only by running on real 10-season data (Step 32)
+
+Three genuine defects, none caught by any prior synthetic-data test, surfaced only once
+`fpl dataset` → `fpl eda` → `fpl baseline` ran end-to-end against all ten real seasons:
+
+1. **`fit_glm_baseline` crashed** (`ValueError: Input y contains NaN`) because
+   `label_defensive_contribution` is null for every season before 2025-26 (~88% of rows) — the
+   aggregate DC stat did not exist in FPL scoring until then — but the fit only filtered on
+   `label_minutes > 0`, not on the label's own nullness. Fixed by filtering to non-null labels
+   per component before fitting; a component/position combination with zero non-null labels simply
+   gets no model entry, mirroring `predict_glm_baseline`'s existing "no model → NaN" contract.
+2. **`naive_rolling_mean_predictions` crashed** on `pl.concat([])` when given a zero-row input frame
+   — a real state reached by the era-continuity experiment's `test_era` slice before 2025-26 facts
+   existed. Fixed with an early-return guard that returns the empty frame with the `naive_*` columns
+   added (empty, correctly typed).
+3. **`component_regression_metrics` filtered only null values, not NaN.** `predict_glm_baseline` fills
+   a position with no fitted model using `np.nan`, and polars' `drop_nulls()` does not remove NaN —
+   `null_count()` reports 0 and `is_nan()` reports true for such values. This was invisible in the main
+   baseline flow (there the *actual* validation label was itself always null wherever a prediction was
+   structurally missing, so `drop_nulls()` coincidentally caught it), but the era-continuity
+   experiment's real, non-null 2025-26 labels exposed it: GK had no fitted DC model, so its NaN
+   predictions poisoned the entire "overall" `np.mean`/`np.sqrt` aggregate into `nan`. Fixed by also
+   filtering `.is_not_nan()` on both actual and predicted columns.
+
+### 5.8 Defensive-contribution era-continuity experiment (Step 32) — scope and result
+
+Step 32's own prose ("trained 2016-19, evaluated on 2024-25") contradicts the plan's own confirmed
+Q8/A8 answer ("DC trains on 2016-19, tests on 2025-26; report it as the era-continuity experiment").
+This is a plan-text inconsistency, not a deviation from user intent — the implementation follows
+Q8/A8, since 2024-25 has no real DC label to evaluate against at all (the aggregate field is null for
+every season 2019-20 through 2024-25) while 2025-26 is the only season where it is populated.
+
+`label_defensive_contribution` is also null in the raw facts table for 2016-17/2017-18/2018-19
+themselves, even though its raw components (`cbi`, `tackles`, `recoveries`) are populated for exactly
+those three seasons. Per the user's explicit choice, `src/fpl/training/era_continuity.py` derives the
+label on-the-fly from those raw components — using the exact formula
+`quality.checks._defensive_contribution_formula_gate` already validates wherever the real aggregate
+field is observed — scoped to this one experiment only: it never writes back to
+`facts/player_fixture` or the persisted training matrix, so every other consumer of
+`label_defensive_contribution` continues to see it null for 2016-19 exactly as the real data is. GK is
+excluded from the experiment entirely, since the formula gate was only ever verified for DEF/MID/FWD
+and DC scoring does not apply to GK regardless.
+
+**Result** (validation-safe: only the test split's real 2025-26 label is read, as Q8/A8 sanctions):
+the GLM trained on derived 2016-19 labels does **not** transfer well to 2025-26 — overall MAE 2.31
+(RMSE 3.50) versus a same-season naive trailing-mean baseline's MAE 1.39 (RMSE 2.71), n=26,320
+non-GK rows. Per position the gap holds throughout: DEF 2.24 vs 1.77, MID 2.64 vs 1.57, FWD 1.21 vs
+0.93. This is real evidence against the assumption that Opta's CBI/tackle/recovery definitions held
+constant across the seven-year gap — directly answering the plan's own flagged "Open risk" ("No
+season of overlap between 2018/19 and 2025/26 means nothing proves Opta's CBI/tackle/recovery
+definitions held constant across the seven-year gap"). Any future defensive-contribution model
+trained wholly or partly on pre-2019-20 data should treat this transfer gap as a live risk, not a
+resolved one.
+
+### 5.9 Step 32 outcome summary
+
+Measured on real data (253,509 player-fixture rows, 10 seasons; training split 196,479 rows across
+2016-17…2023-24, validation split 27,283 rows on 2024-25):
+
+| Metric | Value |
+| --- | --- |
+| Naive baseline, `total_points_fpl` MAE / RMSE (validation) | 1.05 / 2.08 |
+| GLM system score, overall MAE / RMSE (validation) | 1.23 / 2.05 |
+| GLM system score, hauler-bucket MAE / RMSE (validation, n=648) | 8.70 / 9.09 |
+| Mean Spearman rank correlation per gameweek (validation, 37 gameweeks) | 0.65 |
+| DC era-continuity, GLM overall MAE (test, 2025-26) | 2.31 |
+| DC era-continuity, naive overall MAE (test, 2025-26) | 1.39 |
+
+Three real bugs were found and fixed (§5.7), none of which any synthetic-data test had caught. The
+plan's own era-continuity requirement (§5.8) produced a genuine, actionable finding rather than a
+formality — the transfer gap is real, not merely a hypothetical risk to note.
