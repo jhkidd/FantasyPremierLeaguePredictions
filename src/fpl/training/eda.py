@@ -43,6 +43,7 @@ __all__ = [
     "correlation_matrices",
     "distribution_report",
     "high_correlation_pairs",
+    "masked_feature_obs_column",
     "missing_value_report",
     "mutual_information_report",
     "numeric_feature_columns",
@@ -112,7 +113,7 @@ def missing_value_report(frame: pl.DataFrame) -> pl.DataFrame:
     provenance through every feature.
     """
     height = frame.height
-    obs_column_by_feature = _masked_feature_obs_column(frame)
+    obs_column_by_feature = masked_feature_obs_column(frame)
     filtered_true = {
         obs_column: frame.filter(pl.col(obs_column))
         for obs_column in set(obs_column_by_feature.values())
@@ -147,10 +148,17 @@ def missing_value_report(frame: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
-def _masked_feature_obs_column(frame: pl.DataFrame) -> dict[str, str]:
+def masked_feature_obs_column(frame: pl.DataFrame) -> dict[str, str]:
     """Map every present rolling-feature column derived from a masked
     group back to its governing ``obs_*`` column, by reconstructing
-    :mod:`fpl.features.rolling`'s own naming scheme."""
+    :mod:`fpl.features.rolling`'s own naming scheme.
+
+    Also used by :mod:`fpl.training.baseline` (Step 29) to exclude these
+    columns from the primary GLM fit — an era-masked feature blended
+    across eras via ordinary median-imputation would average together
+    values from an era that never recorded the stat with values from one
+    that did, which is exactly the systematic error the mask exists to
+    prevent (plan Q22)."""
     from fpl.features.rolling import FIXTURE_WINDOWS, MASKED_COLUMN_GROUPS
 
     labels = (*(str(w) for w in FIXTURE_WINDOWS), "season_to_date", "last_season")
