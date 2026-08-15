@@ -19,6 +19,7 @@ __all__ = [
     "chunk_partition",
     "crosswalk_file",
     "data_features_table",
+    "data_training_matrix",
     "decode_as_of",
     "encode_as_of",
     "facts_table",
@@ -251,3 +252,12 @@ def data_features_table(season: Season, as_of: datetime, *, data_root: Path | No
     can be inspected after the fact, mirroring ``raw_partition``'s
     ``as_of=`` naming."""
     return _root(data_root) / "features" / f"season={season}" / f"as_of={encode_as_of(as_of)}"
+
+
+def data_training_matrix(*, data_root: Path | None = None) -> Path:
+    """The training matrix: ``data/training/matrix.parquet``.
+
+    A pure function of ``facts``/``features`` and trivially rebuildable via
+    ``fpl dataset`` — ``.gitignore``d rather than committed, unlike
+    everything else under ``data/`` (plan Phase A, Step 19)."""
+    return _root(data_root) / "training" / "matrix.parquet"

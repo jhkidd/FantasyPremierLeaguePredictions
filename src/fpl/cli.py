@@ -100,6 +100,7 @@ from fpl.staging.vaastav import ERA_BY_SEASON
 from fpl.storage import paths
 from fpl.storage.parquet_io import write_parquet
 from fpl.storage.raw_io import write_raw
+from fpl.training.dataset import build_training_matrix
 from fpl.understat_capture import capture_league_data, capture_match_data
 
 app = typer.Typer(
@@ -878,6 +879,37 @@ def features(
     typer.echo(
         f"features: team resolution fell back to current team for "
         f"{result.diagnostics.fallback_count} player(s)"
+    )
+
+
+@app.command()
+def dataset(ctx: typer.Context) -> None:
+    """Build the training matrix across every season with built
+    ``facts/player_fixture`` and write it to ``data/training/matrix.parquet``.
+
+    A season is silently skipped (not an error) when its facts have not been
+    built yet — the same "missing is a normal, expected state" contract
+    every other ``facts``-reading command in this CLI already follows."""
+    data_root = _data_root(ctx)
+    seasons = [
+        season
+        for season in sorted(ERA_BY_SEASON)
+        if (
+            paths.facts_table("player_fixture", season, data_root=data_root) / "part.parquet"
+        ).exists()
+    ]
+    if not seasons:
+        typer.echo("dataset: skipped, no facts/player_fixture built for any season yet")
+        return
+
+    matrix = build_training_matrix(seasons, data_root=data_root)
+
+    out_path = paths.data_training_matrix(data_root=data_root)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    write_parquet(matrix, out_path)
+
+    typer.echo(
+        f"dataset: {matrix.height} row(s) across {len(seasons)} season(s) written to {out_path}"
     )
 
 

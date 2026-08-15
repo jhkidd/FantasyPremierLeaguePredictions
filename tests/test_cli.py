@@ -28,7 +28,16 @@ FUTURE_DEADLINE = "2099-01-01T00:00:00Z"
 def test_help_lists_the_intended_surface() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == exit_codes.SUCCESS
-    for command in ("ingest", "stage", "facts", "crosswalk", "check", "features", "backfill"):
+    for command in (
+        "ingest",
+        "stage",
+        "facts",
+        "crosswalk",
+        "check",
+        "features",
+        "dataset",
+        "backfill",
+    ):
         assert command in result.output
 
 
@@ -551,6 +560,122 @@ def test_exit_codes_are_mutually_distinct() -> None:
         exit_codes.QUALITY_GATE_FAILED,
     ]
     assert len(set(codes)) == len(codes)
+
+
+class TestDatasetCommand:
+    """CLI surface for Step 23: building ``data/training/matrix.parquet``."""
+
+    def _facts(self, root: Path, season: str, rows: list[dict]) -> None:
+        import polars as pl
+
+        from fpl.storage.parquet_io import write_parquet
+
+        columns = [
+            "season",
+            "fixture_id",
+            "player_id",
+            "player_code",
+            "team_id",
+            "team_code",
+            "opponent_team_id",
+            "opponent_team_code",
+            "was_home",
+            "kickoff_time",
+            "event",
+            "position",
+            "minutes",
+            "starts",
+            "goals_scored",
+            "assists",
+            "goals_conceded",
+            "own_goals",
+            "penalties_saved",
+            "penalties_missed",
+            "yellow_cards",
+            "red_cards",
+            "saves",
+            "cbi",
+            "tackles",
+            "recoveries",
+            "defensive_contribution",
+            "attempted_passes",
+            "completed_passes",
+            "key_passes",
+            "big_chances_created",
+            "big_chances_missed",
+            "open_play_crosses",
+            "dribbles",
+            "tackled",
+            "fouls",
+            "offside",
+            "target_missed",
+            "errors_leading_to_goal",
+            "errors_leading_to_goal_attempt",
+            "penalties_conceded",
+            "winning_goals",
+            "expected_goals",
+            "expected_assists",
+            "expected_goal_involvements",
+            "expected_goals_conceded",
+            "total_points_fpl",
+            "bonus_fpl",
+            "bps_fpl",
+            "obs_defensive",
+            "obs_bps_inputs",
+            "obs_expected",
+            "obs_starts",
+        ]
+        full_rows = []
+        for row in rows:
+            full_row: dict = dict.fromkeys(columns, 0)
+            full_row.update(
+                {
+                    "season": season,
+                    "player_code": "code-1",
+                    "was_home": True,
+                    "position": "MID",
+                    "obs_defensive": True,
+                    "obs_bps_inputs": True,
+                    "obs_expected": True,
+                    "obs_starts": True,
+                }
+            )
+            full_row.update(row)
+            full_rows.append(full_row)
+
+        frame = pl.DataFrame(full_rows).with_columns(
+            pl.col("kickoff_time").str.strptime(pl.Datetime(time_unit="us", time_zone="UTC"))
+        )
+        out_dir = root / "facts" / "player_fixture" / f"season={season}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_parquet(frame, out_dir / "part.parquet")
+
+    def test_no_facts_built_reports_nothing_to_build(self, isolated_data_root: Path) -> None:
+        result = runner.invoke(app, ["--data-root", str(isolated_data_root), "dataset"])
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "skipped" in result.output
+
+    def test_builds_matrix_from_available_season(self, isolated_data_root: Path) -> None:
+        self._facts(
+            isolated_data_root,
+            "2016-17",
+            [
+                {
+                    "fixture_id": 1,
+                    "player_id": 1,
+                    "event": 1,
+                    "kickoff_time": "2016-08-13T14:00:00",
+                    "minutes": 90,
+                }
+            ],
+        )
+
+        result = runner.invoke(app, ["--data-root", str(isolated_data_root), "dataset"])
+
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "1 row(s) across 1 season(s)" in result.output
+        matrix_path = isolated_data_root / "training" / "matrix.parquet"
+        assert matrix_path.is_file()
 
 
 class TestBackfillEloCommand:

@@ -17,3 +17,9 @@ scratch/
 
 # Notebook outputs are stripped before commit
 .ipynb_checkpoints/
+
+# Training matrices are a pure function of facts/features (data/eda/ figures
+# stay tracked; the matrix itself is large and trivially rebuilt via
+# `fpl dataset`, so it is the one derived artefact excepted from the
+# data/-is-the-committed-record rule above).
+data/training/
