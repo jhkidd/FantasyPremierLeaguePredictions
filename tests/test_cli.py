@@ -996,7 +996,8 @@ class TestBaselineCommand:
         assert "Naive baseline" in report_text
         assert "GLM baseline" in report_text
         assert "System score" in report_text
-        assert "never read here" in report_text
+        assert "sanctioned one-time exception" in report_text
+        assert "Defensive-contribution era-continuity experiment" in report_text
 
 
 class TestBackfillEloCommand:

@@ -45,6 +45,16 @@ def _render(tmp_path: Path) -> str:
             "spearman": [0.6, 0.8],
         }
     )
+    era_continuity_metrics = pl.DataFrame(
+        {
+            "group": ["overall", "DEF"],
+            "model": ["glm", "glm"],
+            "mae": [1.0, 0.8],
+            "rmse": [1.5, 1.2],
+            "poisson_deviance": [0.9, 0.7],
+            "n": [500, 200],
+        }
+    )
 
     report_path = tmp_path / "docs" / "model-prototype-baseline.md"
     return render_baseline_report(
@@ -56,6 +66,7 @@ def _render(tmp_path: Path) -> str:
         glm_metrics=glm_metrics,
         points_report=points_report,
         gameweek_spearman=gameweek_spearman,
+        era_continuity_metrics=era_continuity_metrics,
         report_path=report_path,
     )
 
@@ -68,6 +79,7 @@ def test_report_has_every_section(tmp_path: Path) -> None:
         "GLM baseline",
         "System score",
         "Rank correlation by gameweek",
+        "Defensive-contribution era-continuity experiment",
     ):
         assert heading in report
 
@@ -88,4 +100,10 @@ def test_gameweek_spearman_is_summarised_not_listed_row_by_row(tmp_path: Path) -
 
 def test_test_split_is_never_mentioned_as_used(tmp_path: Path) -> None:
     report = _render(tmp_path)
-    assert "never read here" in report
+    assert "sanctioned one-time exception" in report
+
+
+def test_era_continuity_table_is_rendered(tmp_path: Path) -> None:
+    report = _render(tmp_path)
+    assert "| group | model |" in report
+    assert "| overall | glm |" in report

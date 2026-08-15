@@ -94,13 +94,22 @@ def component_regression_metrics(
     plus Poisson deviance when ``poisson=True`` (plan Step 30's "count
     targets" - :data:`fpl.training.baseline.GLM_COMPONENTS`).
 
-    A row where either value is null is excluded rather than counted as an
-    error - a null prediction (e.g. a player's first-ever fixture, with no
-    rolling history yet) is a structural gap in the baseline's coverage, not
-    a wrong guess, and averaging it in as an error would penalise the
-    baseline twice for the same missing history.
+    A row where either value is null *or* NaN is excluded rather than
+    counted as an error - a null/NaN prediction (e.g. a player's
+    first-ever fixture with no rolling history yet, or a position with no
+    fitted model at all - :func:`fpl.training.baseline.predict_glm_baseline`
+    fills exactly this case with ``NaN``, not null) is a structural gap in
+    the baseline's coverage, not a wrong guess, and averaging it in as an
+    error would penalise the baseline twice for the same missing history
+    (worse, silently NaN-poisoning the whole aggregate, since ``NaN`` -
+    unlike null - survives ``drop_nulls()`` and propagates through any
+    later ``mean``/``sqrt``).
     """
-    paired = frame.select(actual_column, predicted_column).drop_nulls()
+    paired = (
+        frame.select(actual_column, predicted_column)
+        .drop_nulls()
+        .filter(pl.col(actual_column).is_not_nan() & pl.col(predicted_column).is_not_nan())
+    )
     if paired.height == 0:
         return {"mae": None, "rmse": None, "poisson_deviance": None, "n": 0}
 

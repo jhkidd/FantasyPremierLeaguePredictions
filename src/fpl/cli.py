@@ -119,6 +119,7 @@ from fpl.training.eda_plots import (
     plot_target_distribution,
 )
 from fpl.training.eda_report import render_eda_report
+from fpl.training.era_continuity import defensive_contribution_era_continuity_report
 from fpl.training.evaluation import (
     assemble_predicted_points,
     component_regression_metrics,
@@ -1095,8 +1096,12 @@ def baseline(
     training split, evaluate both **on the validation split only**, and
     write a markdown report to ``docs/model-prototype-baseline.md``.
 
-    Never reads the test split (plan Step 31's explicit boundary) - that
-    one-time final read is reserved for later in Phase A/B.
+    Never reads the test split for any of these metrics (plan Step 31's
+    explicit boundary) - that one-time final read is reserved for later in
+    Phase A/B, with one sanctioned exception: Step 32's defensive-
+    contribution era-continuity experiment (plan Q8/A8), which has no real
+    label anywhere in the validation split to check against instead (see
+    :func:`fpl.training.era_continuity.defensive_contribution_era_continuity_report`).
 
     Builds/loads the training matrix the same way ``fpl dataset``/``fpl eda``
     do if ``data/training/matrix.parquet`` is not already present."""
@@ -1117,6 +1122,10 @@ def baseline(
 
     scored = assemble_predicted_points(validation_with_predictions)
 
+    era_continuity_metrics = defensive_contribution_era_continuity_report(
+        matrix, data_root=data_root
+    )
+
     markdown = render_baseline_report(
         train_row_count=train.height,
         train_seasons=sorted(train["season"].unique().to_list()),
@@ -1126,6 +1135,7 @@ def baseline(
         glm_metrics=_glm_metrics_table(validation_with_predictions),
         points_report=points_error_report(scored),
         gameweek_spearman=spearman_by_gameweek(scored),
+        era_continuity_metrics=era_continuity_metrics,
         report_path=report_path or _DEFAULT_BASELINE_REPORT_PATH,
     )
 

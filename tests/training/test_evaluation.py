@@ -66,6 +66,22 @@ class TestComponentRegressionMetrics:
         assert metrics["n"] == 1
         assert metrics["mae"] == pytest.approx(0.0)
 
+    def test_nan_predictions_are_excluded_not_averaged_in_as_nan(self) -> None:
+        """`predict_glm_baseline` fills a position with no fitted model
+        with NaN, not null (a real-data finding from Step 32's era-
+        continuity experiment). NaN survives `drop_nulls()` - this must
+        still exclude the row rather than let a single NaN silently
+        poison the whole aggregate via mean/sqrt propagation."""
+        frame = pl.DataFrame({"actual": [1.0, 2.0, 3.0], "predicted": [1.0, float("nan"), 3.0]})
+
+        metrics = component_regression_metrics(
+            frame, actual_column="actual", predicted_column="predicted"
+        )
+
+        assert metrics["n"] == 2
+        assert metrics["mae"] == pytest.approx(0.0)
+        assert metrics["rmse"] == pytest.approx(0.0)
+
     def test_poisson_deviance_is_zero_for_a_perfect_prediction(self) -> None:
         frame = pl.DataFrame({"actual": [0.0, 1.0, 3.0], "predicted": [0.0, 1.0, 3.0]})
 

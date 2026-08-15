@@ -199,6 +199,43 @@ class TestFitGlmBaseline:
             for component in GLM_COMPONENTS:
                 assert (component, position) in bundle.component_models
 
+    def test_component_with_all_null_labels_for_a_position_has_no_model(self) -> None:
+        """`defensive_contribution` is null for every row before the
+        2025-26 season it was introduced in (real-data finding from Step
+        32) - a training split entirely predating that rule must not
+        crash trying to fit a PoissonRegressor on an all-null target, and
+        must simply have no entry for that (component, position) pair, so
+        `predict_glm_baseline` falls back to its existing None/NaN
+        contract for it."""
+        frame = _glm_frame().with_columns(
+            pl.lit(None, dtype=pl.Float64).alias("label_defensive_contribution")
+        )
+
+        bundle = fit_glm_baseline(frame)
+
+        for position in POSITIONS:
+            assert ("defensive_contribution", position) not in bundle.component_models
+        # Every other component is unaffected.
+        for position in POSITIONS:
+            for component in [c for c in GLM_COMPONENTS if c != "defensive_contribution"]:
+                assert (component, position) in bundle.component_models
+
+    def test_component_with_partially_null_labels_fits_on_non_null_rows_only(self) -> None:
+        frame = _glm_frame()
+        # Null out one row's defensive_contribution label per position -
+        # the fit must still succeed and simply skip that row.
+        mutated = frame.with_columns(
+            pl.when(pl.int_range(pl.len()).over("position") == 0)
+            .then(None)
+            .otherwise(pl.col("label_defensive_contribution"))
+            .alias("label_defensive_contribution")
+        )
+
+        bundle = fit_glm_baseline(mutated)
+
+        for position in POSITIONS:
+            assert ("defensive_contribution", position) in bundle.component_models
+
     def test_component_models_are_unaffected_by_zero_minute_row_targets(self) -> None:
         """A row where `label_minutes == 0` has no meaningful component
         rate - changing its target value must not move a component

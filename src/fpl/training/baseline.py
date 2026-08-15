@@ -115,6 +115,15 @@ def naive_rolling_mean_predictions(
     )
     output_columns = {target: f"naive_{target}" for target in target_columns}
 
+    if frame.height == 0:
+        # No groups to iterate at all - an empty frame (e.g. a test-split
+        # slice that has not been backfilled yet) must return the same
+        # empty frame with the new naive_ columns present, not crash
+        # concatenating an empty list of pieces below.
+        return frame.with_columns(
+            [pl.Series(output_columns[target], [], dtype=pl.Float64) for target in target_columns]
+        )
+
     pieces = []
     for _keys, group in frame.sort("event").group_by(["season", "player_id"], maintain_order=True):
         history: dict[str, list[float]] = {target: [] for target in target_columns}
@@ -203,6 +212,18 @@ def fit_glm_baseline(
     and scikit-learn only warns and silently drops it anyway, which would
     make :attr:`GlmBaseline.feature_columns` an inaccurate record of what
     the fitted pipelines actually used.
+
+    A component whose label is null for every played row of a position
+    (``defensive_contribution`` before the 2025-26 season it was
+    introduced in, for any training split that predates that rule) has no
+    entry in the returned ``component_models`` mapping rather than being
+    fit on a nonsense all-null target - :func:`predict_glm_baseline`
+    already returns ``None``/``NaN`` for a ``(component, position)`` pair
+    with no fitted model, so this is simply the fit-time mirror of that
+    same "no data, no prediction" contract. A component with *some* but
+    not all labels null (should not occur for the label columns this
+    trains today, but is not assumed away) is fit on only its non-null
+    rows.
     """
     candidate_feature_columns = primary_feature_columns(train_frame)
     feature_columns = [
@@ -231,11 +252,15 @@ def fit_glm_baseline(
         position_played = played.filter(pl.col("position") == position)
         if position_played.height == 0:
             continue
-        played_features = position_played.select(feature_columns).to_numpy()
         for component in components:
+            label_column = f"label_{component}"
+            component_frame = position_played.filter(pl.col(label_column).is_not_null())
+            if component_frame.height == 0:
+                continue
             component_pipeline = _pipeline(PoissonRegressor())
             component_pipeline.fit(
-                played_features, position_played[f"label_{component}"].to_numpy()
+                component_frame.select(feature_columns).to_numpy(),
+                component_frame[label_column].to_numpy(),
             )
             component_models[(component, position)] = component_pipeline
 
