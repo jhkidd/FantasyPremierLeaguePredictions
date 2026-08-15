@@ -80,6 +80,7 @@ from fpl.ownership import (
 )
 from fpl.quality.checks import check_facts_tables, check_staged_tables
 from fpl.quality.gates import has_blocking_violations
+from fpl.scoring.base import POSITIONS
 from fpl.sources.clubelo import ClubEloConnector
 from fpl.sources.errors import BlockedError, SchemaError, SourceError
 from fpl.sources.footballdata import FootballDataConnector
@@ -102,6 +103,13 @@ from fpl.staging.vaastav import ERA_BY_SEASON
 from fpl.storage import paths
 from fpl.storage.parquet_io import read_parquet, write_parquet
 from fpl.storage.raw_io import write_raw
+from fpl.training.baseline import (
+    GLM_COMPONENTS,
+    fit_glm_baseline,
+    naive_rolling_mean_predictions,
+    predict_glm_baseline,
+)
+from fpl.training.baseline_report import render_baseline_report
 from fpl.training.dataset import LABEL_COLUMNS, build_training_matrix
 from fpl.training.eda import run_eda_sweep
 from fpl.training.eda_plots import (
@@ -111,7 +119,13 @@ from fpl.training.eda_plots import (
     plot_target_distribution,
 )
 from fpl.training.eda_report import render_eda_report
-from fpl.training.splits import chronological_split
+from fpl.training.evaluation import (
+    assemble_predicted_points,
+    component_regression_metrics,
+    points_error_report,
+    spearman_by_gameweek,
+)
+from fpl.training.splits import VALIDATION_SEASON, chronological_split
 from fpl.understat_capture import capture_league_data, capture_match_data
 
 app = typer.Typer(
@@ -1021,6 +1035,107 @@ def eda(
     typer.echo(
         f"eda: {train.height} training row(s) analysed, report written to "
         f"{resolved_report_path}, figures written to {eda_dir}"
+    )
+
+
+_DEFAULT_BASELINE_REPORT_PATH = (
+    Path(__file__).resolve().parents[2] / "docs" / "model-prototype-baseline.md"
+)
+
+# Every LABEL_COLUMNS entry with its "label_" prefix stripped - the naive
+# baseline's own target-name convention (fpl.training.baseline).
+_ALL_TARGETS: tuple[str, ...] = tuple(label[len("label_") :] for label in LABEL_COLUMNS)
+
+# glm_minutes plus every GLM_COMPONENTS target - the components the GLM
+# per-position metrics table covers. Poisson deviance only applies to the
+# count targets, never to minutes (Ridge).
+_GLM_TARGETS: tuple[str, ...] = ("minutes", *GLM_COMPONENTS)
+
+
+def _naive_metrics_table(validation: pl.DataFrame) -> pl.DataFrame:
+    rows = [
+        {
+            "component": target,
+            **component_regression_metrics(
+                validation, actual_column=f"label_{target}", predicted_column=f"naive_{target}"
+            ),
+        }
+        for target in _ALL_TARGETS
+    ]
+    return pl.DataFrame(rows)
+
+
+def _glm_metrics_table(validation: pl.DataFrame) -> pl.DataFrame:
+    rows = []
+    for target in _GLM_TARGETS:
+        is_count_target = target in GLM_COMPONENTS
+        for position in sorted(POSITIONS):
+            subset = validation.filter(pl.col("position") == position)
+            metrics = component_regression_metrics(
+                subset,
+                actual_column=f"label_{target}",
+                predicted_column=f"glm_{target}",
+                poisson=is_count_target,
+            )
+            rows.append({"component": target, "position": position, **metrics})
+    return pl.DataFrame(rows)
+
+
+@app.command()
+def baseline(
+    ctx: typer.Context,
+    report_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--report-path", help="Override the markdown report output path (for testing)."
+        ),
+    ] = None,
+) -> None:
+    """Fit the Step 28 naive and Step 29 GLM baselines on the chronological
+    training split, evaluate both **on the validation split only**, and
+    write a markdown report to ``docs/model-prototype-baseline.md``.
+
+    Never reads the test split (plan Step 31's explicit boundary) - that
+    one-time final read is reserved for later in Phase A/B.
+
+    Builds/loads the training matrix the same way ``fpl dataset``/``fpl eda``
+    do if ``data/training/matrix.parquet`` is not already present."""
+    data_root = _data_root(ctx)
+    matrix = _load_or_build_training_matrix(data_root)
+    if matrix is None:
+        typer.echo("baseline: skipped, no training matrix available yet (run `fpl dataset` first)")
+        return
+
+    train, validation, _test = chronological_split(matrix)
+    if train.height == 0 or validation.height == 0:
+        typer.echo("baseline: skipped, chronological train/validation split is empty")
+        return
+
+    glm_bundle = fit_glm_baseline(train)
+    validation_with_glm = predict_glm_baseline(glm_bundle, validation)
+    validation_with_predictions = naive_rolling_mean_predictions(validation_with_glm)
+
+    scored = assemble_predicted_points(validation_with_predictions)
+
+    markdown = render_baseline_report(
+        train_row_count=train.height,
+        train_seasons=sorted(train["season"].unique().to_list()),
+        validation_row_count=validation.height,
+        validation_season=VALIDATION_SEASON,
+        naive_metrics=_naive_metrics_table(validation_with_predictions),
+        glm_metrics=_glm_metrics_table(validation_with_predictions),
+        points_report=points_error_report(scored),
+        gameweek_spearman=spearman_by_gameweek(scored),
+        report_path=report_path or _DEFAULT_BASELINE_REPORT_PATH,
+    )
+
+    resolved_report_path = report_path or _DEFAULT_BASELINE_REPORT_PATH
+    resolved_report_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_report_path.write_text(markdown, encoding="utf-8")
+
+    typer.echo(
+        f"baseline: {validation.height} validation row(s) evaluated, report written to "
+        f"{resolved_report_path}"
     )
 
 

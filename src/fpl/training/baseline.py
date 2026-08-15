@@ -195,8 +195,21 @@ def fit_glm_baseline(
     for reasons that have nothing to do with the feature set. A position
     absent from ``train_frame`` (or with no rows where anyone played)
     simply has no entry in the returned mappings.
+
+    A :func:`primary_feature_columns` column with zero observed values in
+    ``train_frame`` (e.g. a team-context feature no season in this training
+    split ever populated) is dropped from the fit entirely rather than
+    handed to ``SimpleImputer`` - there is nothing to impute a median from,
+    and scikit-learn only warns and silently drops it anyway, which would
+    make :attr:`GlmBaseline.feature_columns` an inaccurate record of what
+    the fitted pipelines actually used.
     """
-    feature_columns = primary_feature_columns(train_frame)
+    candidate_feature_columns = primary_feature_columns(train_frame)
+    feature_columns = [
+        column
+        for column in candidate_feature_columns
+        if train_frame[column].null_count() < train_frame.height
+    ]
     excluded = sorted(masked_feature_obs_column(train_frame))
     played = train_frame.filter(pl.col("label_minutes") > 0)
 

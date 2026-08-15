@@ -37,6 +37,7 @@ def test_help_lists_the_intended_surface() -> None:
         "features",
         "dataset",
         "eda",
+        "baseline",
         "backfill",
     ):
         assert command in result.output
@@ -821,6 +822,181 @@ class TestEdaCommand:
         assert any(eda_dir.glob("target_distribution_*.png"))
         assert (eda_dir / "correlation_heatmap_pearson.png").is_file()
         assert (eda_dir / "missingness_by_season.png").is_file()
+
+
+class TestBaselineCommand:
+    """CLI surface for Step 31: fitting/evaluating the Step 28-29 baselines
+    and writing ``docs/model-prototype-baseline.md``."""
+
+    def _facts(self, root: Path, season: str, n_events: int) -> None:
+        from datetime import timedelta
+
+        import polars as pl
+
+        from fpl.storage.parquet_io import write_parquet
+
+        season_start_year = int(season[:4])
+
+        columns = [
+            "season",
+            "fixture_id",
+            "player_id",
+            "player_code",
+            "team_id",
+            "team_code",
+            "opponent_team_id",
+            "opponent_team_code",
+            "was_home",
+            "kickoff_time",
+            "event",
+            "position",
+            "minutes",
+            "starts",
+            "goals_scored",
+            "assists",
+            "goals_conceded",
+            "own_goals",
+            "penalties_saved",
+            "penalties_missed",
+            "yellow_cards",
+            "red_cards",
+            "saves",
+            "cbi",
+            "tackles",
+            "recoveries",
+            "defensive_contribution",
+            "attempted_passes",
+            "completed_passes",
+            "key_passes",
+            "big_chances_created",
+            "big_chances_missed",
+            "open_play_crosses",
+            "dribbles",
+            "tackled",
+            "fouls",
+            "offside",
+            "target_missed",
+            "errors_leading_to_goal",
+            "errors_leading_to_goal_attempt",
+            "penalties_conceded",
+            "winning_goals",
+            "expected_goals",
+            "expected_assists",
+            "expected_goal_involvements",
+            "expected_goals_conceded",
+            "total_points_fpl",
+            "bonus_fpl",
+            "bps_fpl",
+            "obs_defensive",
+            "obs_bps_inputs",
+            "obs_expected",
+            "obs_starts",
+        ]
+        full_rows = []
+        for event in range(1, n_events + 1):
+            cbi = event % 5
+            tackles = event % 3
+            recoveries = event % 4
+            kickoff = datetime(season_start_year, 8, 13) + timedelta(days=event * 7)
+            full_row: dict = dict.fromkeys(columns, 0)
+            full_row.update(
+                {
+                    "season": season,
+                    "player_code": "code-1",
+                    "was_home": event % 2 == 0,
+                    "position": "MID",
+                    "obs_defensive": True,
+                    "obs_bps_inputs": True,
+                    "obs_expected": True,
+                    "obs_starts": True,
+                    "fixture_id": event,
+                    "player_id": 1,
+                    "event": event,
+                    "kickoff_time": kickoff.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "minutes": 90 if event % 5 else 0,
+                    "goals_scored": event % 2,
+                    "assists": 1 if event % 4 == 0 else 0,
+                    "goals_conceded": event % 3,
+                    "cbi": cbi,
+                    "tackles": tackles,
+                    "recoveries": recoveries,
+                    "defensive_contribution": cbi + tackles + recoveries,
+                    "bonus_fpl": event % 3,
+                    "total_points_fpl": event % 10,
+                }
+            )
+            full_rows.append(full_row)
+
+        frame = pl.DataFrame(full_rows).with_columns(
+            pl.col("kickoff_time").str.strptime(pl.Datetime(time_unit="us", time_zone="UTC"))
+        )
+        out_dir = root / "facts" / "player_fixture" / f"season={season}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_parquet(frame, out_dir / "part.parquet")
+
+    def test_no_matrix_available_reports_nothing_to_analyse(
+        self, isolated_data_root: Path, tmp_path: Path
+    ) -> None:
+        report_path = tmp_path / "report.md"
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "baseline",
+                "--report-path",
+                str(report_path),
+            ],
+        )
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "skipped" in result.output
+        assert not report_path.exists()
+
+    def test_train_only_reports_empty_split(self, isolated_data_root: Path, tmp_path: Path) -> None:
+        self._facts(isolated_data_root, "2016-17", 20)
+        report_path = tmp_path / "report.md"
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "baseline",
+                "--report-path",
+                str(report_path),
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "skipped" in result.output
+        assert not report_path.exists()
+
+    def test_fits_and_evaluates_writing_a_report(
+        self, isolated_data_root: Path, tmp_path: Path
+    ) -> None:
+        self._facts(isolated_data_root, "2016-17", 30)
+        self._facts(isolated_data_root, "2024-25", 15)
+        report_path = tmp_path / "docs" / "model-prototype-baseline.md"
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "baseline",
+                "--report-path",
+                str(report_path),
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert "validation row(s) evaluated" in result.output
+        assert report_path.is_file()
+        report_text = report_path.read_text(encoding="utf-8")
+        assert "Naive baseline" in report_text
+        assert "GLM baseline" in report_text
+        assert "System score" in report_text
+        assert "never read here" in report_text
 
 
 class TestBackfillEloCommand:
