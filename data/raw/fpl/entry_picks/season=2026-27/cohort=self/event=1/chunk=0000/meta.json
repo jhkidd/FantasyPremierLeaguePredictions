@@ -1,0 +1,24 @@
+{
+  "chunk": 0,
+  "cohort": "self",
+  "compressed_bytes": 450,
+  "connector_version": "1",
+  "contaminated_entries": 0,
+  "content_type": "ndjson",
+  "endpoint": "entry_picks",
+  "entry_count": 1,
+  "event": 1,
+  "fetched_at": "2026-08-21T18:45:31.210559+00:00",
+  "http_status": 200,
+  "params": {
+    "entries": [
+      2282251
+    ],
+    "league_id": null
+  },
+  "raw_bytes": 2185,
+  "season": "2026-27",
+  "sha256": "60fb199cd466be47d080751656a78956fe192de9010808197006d6b88d551d99",
+  "source": "fpl",
+  "url": "https://fantasy.premierleague.com/api/entry/{id}/event/1/picks/"
+}
