@@ -54,6 +54,7 @@ from fpl.sources.openfootball import SEASON_FILES as _OPENFOOTBALL_ENDPOINTS
 from fpl.staging.clubelo import stage_ratings
 from fpl.staging.footballdata import stage_matches_and_odds
 from fpl.staging.openfootball import stage_fixtures as stage_openfootball_fixtures
+from fpl.staging.understat import stage_fixtures as stage_understat_fixtures
 from fpl.storage import paths
 from fpl.storage.raw_io import partition_as_of, read_raw
 
@@ -261,12 +262,12 @@ def collect_source_names(
     ``identity/teams.py``/``identity/players.py`` - crosswalks are built
     from raw, never from staged tables). A season with no raw capture on
     disk for a given source contributes nothing, exactly like those
-    modules' existing "partition absent -> skip" behaviour. Understat (task
-    11) is not yet built, so its list is always empty for now.
+    modules' existing "partition absent -> skip" behaviour.
     """
     clubelo_names: set[str] = set()
     footballdata_names: set[str] = set()
     openfootball_names: set[str] = set()
+    understat_names: set[str] = set()
 
     for season in sorted(seasons):
         elo_partition = paths.latest_partition("clubelo", "ratings", season, data_root=data_root)
@@ -301,9 +302,18 @@ def collect_source_names(
                 staged.frame.filter(pl.col("away_country") == "ENG")["away_team"].to_list()
             )
 
+        understat_partition = paths.latest_partition(
+            "understat", "league_data", season, data_root=data_root
+        )
+        if understat_partition is not None:
+            body, _meta = read_raw(understat_partition)
+            staged = stage_understat_fixtures(body, season)
+            understat_names |= set(staged.frame["home_team"].drop_nulls().to_list())
+            understat_names |= set(staged.frame["away_team"].drop_nulls().to_list())
+
     return {
         "clubelo_name": sorted(clubelo_names),
         "footballdata_couk_name": sorted(footballdata_names),
         "openfootball_name": sorted(openfootball_names),
-        "understat_name": [],
+        "understat_name": sorted(understat_names),
     }

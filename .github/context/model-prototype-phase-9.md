@@ -745,6 +745,19 @@ xG/xA back six additional seasons — this is precisely the input that OpenFPL's
 depend on. 27 players remain unmatched in `identity/players_fpl_understat.csv`; they were
 deliberately left out earlier and should be revisited here.
 
+**2026-08-24 update:** the join code has landed
+(`.github/context/understat-player-fixture-join.md`), TDD'd against
+`tests/facts/test_player_fixture_understat.py`. Twelve `understat_*` columns (full stat set, not
+just xG/xA — see that doc's Q3) plus an `obs_understat` presence flag are now added to
+`facts/player_fixture` whenever both a `team_external_ids.understat_name` row and a
+`players_fpl_understat` crosswalk row exist for a given team/player; match resolution is
+`(season, home_team_code, away_team_code)` (no shared fixture id exists between the two sources).
+**Not yet done:** `collect_source_names` now collects Understat's team names, but nobody has run
+`fpl crosswalk refresh` against real data yet, so `team_external_ids.csv`'s `understat_name` column
+is still empty and no season's `facts/player_fixture` has actually been rebuilt with real
+`understat_*` values populated. This §3.1 item stays open until that refresh, hand-review, and a
+full ten-season facts rebuild have happened.
+
 ### 3.2 Candidate algorithms, from the repo's own prior-art review
 
 | Source | Approach | Why it matters here |

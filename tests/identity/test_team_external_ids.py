@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -282,3 +283,26 @@ class TestCollectSourceNames:
         names = collect_source_names([SEASON], data_root=data_root)
 
         assert names["openfootball_name"] == ["Arsenal FC"]
+
+    def test_understat_names_include_both_home_and_away(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        body = json.dumps(
+            {
+                "dates": [
+                    {
+                        "id": "12345",
+                        "isResult": True,
+                        "datetime": "2025-08-16 15:00:00",
+                        "h": {"title": "Arsenal"},
+                        "a": {"title": "Manchester United"},
+                        "goals": {"h": "2", "a": "1"},
+                        "xG": {"h": "1.5", "a": "0.9"},
+                    }
+                ]
+            }
+        ).encode("utf-8")
+        _write_raw_csv(data_root, "understat", "league_data", SEASON, body)
+
+        names = collect_source_names([SEASON], data_root=data_root)
+
+        assert names["understat_name"] == ["Arsenal", "Manchester United"]

@@ -25,6 +25,8 @@ from pathlib import Path
 import polars as pl
 
 from fpl.config import Season
+from fpl.identity.players_understat import load_players_understat_crosswalk
+from fpl.identity.team_external_ids import _split_aliases, load_team_external_ids
 from fpl.storage import paths
 from fpl.storage.parquet_io import read_parquet, write_parquet
 
@@ -83,6 +85,39 @@ _CORE_COLUMNS: tuple[str, ...] = (
 
 _OBSERVED_FPL_COLUMNS: tuple[str, ...] = ("total_points_fpl", "bonus_fpl", "bps_fpl")
 
+_UNDERSTAT_COLUMNS: tuple[str, ...] = (
+    "understat_goals",
+    "understat_own_goals",
+    "understat_shots",
+    "understat_xg",
+    "understat_assists",
+    "understat_xa",
+    "understat_key_passes",
+    "understat_yellow_card",
+    "understat_red_card",
+    "understat_xg_chain",
+    "understat_xg_buildup",
+    "understat_minutes",
+)
+
+_UNDERSTAT_INT_COLUMNS: tuple[str, ...] = (
+    "understat_goals",
+    "understat_own_goals",
+    "understat_shots",
+    "understat_assists",
+    "understat_key_passes",
+    "understat_yellow_card",
+    "understat_red_card",
+    "understat_minutes",
+)
+
+_UNDERSTAT_FLOAT_COLUMNS: tuple[str, ...] = (
+    "understat_xg",
+    "understat_xa",
+    "understat_xg_chain",
+    "understat_xg_buildup",
+)
+
 _COLUMN_ORDER: tuple[str, ...] = (
     "season",
     "fixture_id",
@@ -103,10 +138,12 @@ _COLUMN_ORDER: tuple[str, ...] = (
     *_BPS_INPUT_COLUMNS,
     *_EXPECTED_COLUMNS,
     *_OBSERVED_FPL_COLUMNS,
+    *_UNDERSTAT_COLUMNS,
     "obs_defensive",
     "obs_bps_inputs",
     "obs_expected",
     "obs_starts",
+    "obs_understat",
 )
 
 
@@ -209,6 +246,170 @@ def _with_team_codes(
     return stats
 
 
+def _null_understat_columns(stats: pl.DataFrame) -> pl.DataFrame:
+    columns = [pl.lit(None, dtype=pl.Int64).alias(name) for name in _UNDERSTAT_INT_COLUMNS] + [
+        pl.lit(None, dtype=pl.Float64).alias(name) for name in _UNDERSTAT_FLOAT_COLUMNS
+    ]
+    return stats.with_columns(*columns, pl.lit(False).alias("obs_understat"))
+
+
+def _with_understat_columns(
+    stats: pl.DataFrame, season: Season, *, data_root: Path | None
+) -> pl.DataFrame:
+    """Attach Understat's per-match stats (Phase B §3.1), joined through team
+    and player identity rather than any shared fixture id — Understat's own
+    ``match_id`` has no crosswalk to FPL's ``fixture_id`` at all.
+
+    A fixture is resolved by ``(season, home_team_code, away_team_code)``:
+    two teams meet at most once a season in the Premier League (no
+    replays), so this is unambiguous and immune to postponement-driven date
+    drift, unlike a date-based match. A player is resolved through the
+    existing ``crosswalk/players_fpl_understat.csv``.
+
+    Missing input at any stage (no ``team_external_ids`` crosswalk row for a
+    team, no Understat capture staged, no player crosswalk row) leaves that
+    row's ``understat_*`` columns null and ``obs_understat`` false — never a
+    dropped row, mirroring ``_with_team_codes``'s "absent input -> null, log,
+    don't fail" convention.
+    """
+    fixtures_path = (
+        paths.staged_table("understat_fixtures", season, data_root=data_root) / "part.parquet"
+    )
+    player_match_path = (
+        paths.staged_table("understat_player_match", season, data_root=data_root) / "part.parquet"
+    )
+    if not fixtures_path.exists() or not player_match_path.exists():
+        logger.info(
+            "season %s: no staged Understat data, so understat_* columns are null "
+            "for all %d row(s)",
+            season,
+            stats.height,
+        )
+        return _null_understat_columns(stats)
+
+    team_external_ids = load_team_external_ids(data_root=data_root)
+    if team_external_ids.height == 0:
+        logger.info(
+            "season %s: no team_external_ids crosswalk committed, so understat_* "
+            "columns are null for all %d row(s)",
+            season,
+            stats.height,
+        )
+        return _null_understat_columns(stats)
+
+    # team_code -> Understat's own team-name string (may be alias-joined).
+    code_to_understat_names: dict[str, list[str]] = {
+        row["team_code"]: _split_aliases(row["understat_name"])
+        for row in team_external_ids.iter_rows(named=True)
+    }
+    name_to_code: dict[str, str] = {
+        name: code for code, names in code_to_understat_names.items() for name in names
+    }
+
+    fixtures = read_parquet(fixtures_path)
+    fixtures = fixtures.with_columns(
+        pl.col("home_team")
+        .replace_strict(name_to_code, default=None, return_dtype=pl.Utf8)
+        .alias("home_team_code"),
+        pl.col("away_team")
+        .replace_strict(name_to_code, default=None, return_dtype=pl.Utf8)
+        .alias("away_team_code"),
+    ).drop_nulls(["home_team_code", "away_team_code"])
+
+    team_pair_counts = fixtures.group_by(["home_team_code", "away_team_code"]).agg(
+        pl.len().alias("n")
+    )
+    duplicated = team_pair_counts.filter(pl.col("n") > 1)
+    if duplicated.height:
+        first = duplicated.row(0, named=True)
+        raise ValueError(
+            f"season {season}: understat_fixtures has {first['n']} duplicate rows for team "
+            f"pair (home={first['home_team_code']!r}, away={first['away_team_code']!r}); "
+            "a home/away pair can meet at most once a season"
+        )
+
+    match_lookup = fixtures.select("match_id", "home_team_code", "away_team_code").unique()
+
+    players_crosswalk = load_players_understat_crosswalk(data_root=data_root)
+    if players_crosswalk.height == 0:
+        logger.info(
+            "season %s: no players_fpl_understat crosswalk committed, so understat_* "
+            "columns are null for all %d row(s)",
+            season,
+            stats.height,
+        )
+        return _null_understat_columns(stats)
+
+    player_lookup = players_crosswalk.select("player_code", "understat_player_id").unique(
+        subset=["player_code"]
+    )
+
+    stats = stats.with_columns(
+        pl.col("team_code").cast(pl.Utf8),
+        pl.col("opponent_team_code").cast(pl.Utf8),
+    )
+    home_pair = (
+        pl.when(pl.col("was_home"))
+        .then(pl.col("team_code"))
+        .otherwise(pl.col("opponent_team_code"))
+    )
+    away_pair = (
+        pl.when(pl.col("was_home"))
+        .then(pl.col("opponent_team_code"))
+        .otherwise(pl.col("team_code"))
+    )
+    stats = stats.with_columns(
+        home_pair.alias("_home_team_code"), away_pair.alias("_away_team_code")
+    )
+    stats = stats.join(
+        match_lookup,
+        left_on=["_home_team_code", "_away_team_code"],
+        right_on=["home_team_code", "away_team_code"],
+        how="left",
+    ).drop(["_home_team_code", "_away_team_code"])
+
+    stats = stats.join(player_lookup, on="player_code", how="left")
+
+    player_match = read_parquet(player_match_path).select(
+        pl.col("match_id"),
+        pl.col("player_id").alias("understat_player_id"),
+        pl.col("goals").alias("understat_goals"),
+        pl.col("own_goals").alias("understat_own_goals"),
+        pl.col("shots").alias("understat_shots"),
+        pl.col("xg").alias("understat_xg"),
+        pl.col("assists").alias("understat_assists"),
+        pl.col("xa").alias("understat_xa"),
+        pl.col("key_passes").alias("understat_key_passes"),
+        pl.col("yellow_card").alias("understat_yellow_card"),
+        pl.col("red_card").alias("understat_red_card"),
+        pl.col("xg_chain").alias("understat_xg_chain"),
+        pl.col("xg_buildup").alias("understat_xg_buildup"),
+        pl.col("minutes").alias("understat_minutes"),
+    )
+    stats = stats.join(player_match, on=["match_id", "understat_player_id"], how="left")
+    stats = stats.with_columns(
+        pl.col(name).cast(pl.Int64) for name in _UNDERSTAT_INT_COLUMNS
+    ).with_columns(pl.col(name).cast(pl.Float64) for name in _UNDERSTAT_FLOAT_COLUMNS)
+    stats = stats.with_columns(
+        (pl.col("match_id").is_not_null() & pl.col("understat_player_id").is_not_null()).alias(
+            "obs_understat"
+        )
+    ).drop(["match_id", "understat_player_id"])
+
+    matched = stats["obs_understat"].sum()
+    total = stats.height
+    percentage = (matched / total * 100) if total else 0.0
+    logger.info(
+        "season %s: %d/%d player-fixture row(s) matched to Understat (%.1f%%)",
+        season,
+        matched,
+        total,
+        percentage,
+    )
+
+    return stats
+
+
 def _with_null_column(frame: pl.DataFrame, name: str, dtype: pl.DataType) -> pl.DataFrame:
     if name in frame.columns:
         return frame
@@ -253,6 +454,7 @@ def build_player_fixture_facts(
     )
     stats = _with_null_column(stats, "player_code", pl.Utf8)
     stats = _with_null_column(stats, "starts", pl.Int64)
+    stats = _with_understat_columns(stats, season, data_root=data_root)
     for column in _DEFENSIVE_COLUMNS:
         stats = _with_null_column(stats, column, pl.Int64)
     for column in _EXPECTED_COLUMNS:

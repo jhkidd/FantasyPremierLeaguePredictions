@@ -331,6 +331,51 @@ fpl crosswalk refresh       # extended to draft new team_external_ids rows (neve
 - Two real implementation bugs were caught only by the real-data run (not the unit tests, whose fixtures didn't happen to exercise them): (1) the Elo T-1 join compared a `pl.Date` column against a raw `pl.Datetime` kickoff without normalising to calendar dates first, so a same-day rating (00:00) still counted as "before" a same-day kickoff (14:00) — fixed by taking `.date()` on the kickoff before filtering; (2) `sorted()` on the unresolved-team-name set raised `TypeError` because real data contains `None` team names in some source rows — fixed by filtering `None` out before sorting.
 - Data committed: `data/staged/{teams,fixtures,events,players,price_snapshots,availability_snapshots}/season=2026-27/` (freshly staged from already-captured raw FPL data) and `data/facts/team_fixture/season=2026-27/part.parquet`.
 
+**Update 2026-08-24 (task 15 resolved — R1 confirmed against a real runner; Tier 2 sources wired
+into the daily schedule):** the four Tier 2 connectors had been built, staged once, and committed
+on 2026-08-03/04, but were never actually added to `.github/workflows/daily-snapshot.yml` — only
+`fpl` was scheduled. Discovered mid-GW1 of the 2026-27 season: Club Elo was 3 weeks stale, and
+openfootball/football-data.co.uk had zero 2026-27 data at all.
+
+- **Task 15 (Club Elo runner-connectivity probe), finally run.** A throwaway
+  `workflow_dispatch`-only workflow curled `api.clubelo.com` from a real `ubuntu-latest` runner.
+  First attempt (unbounded) hung for the full 5-minute job timeout with zero output. A second,
+  bounded attempt added DNS + HTTP + HTTPS diagnostics: DNS resolved fine
+  (`37.128.134.74`); **HTTP** connected the TCP socket successfully but then received 0 bytes in
+  15s (`curl: (28) Operation timed out ... with 0 bytes received` — accepted then silently
+  dropped, not a fast error); **HTTPS** couldn't even complete the TCP connect within 8s. **Result:
+  Club Elo is not reliably reachable from a GitHub Actions runner on either scheme** — worse than
+  the sandbox's earlier 502 (Finding A) — confirming Risk R1's documented fallback. The probe
+  workflow was deleted once this was established. A same-day attempt to fetch Club Elo from this
+  session's own local network *also* timed out (TCP connect succeeded, then a read timeout,
+  retried 4x) — a genuine service-side outage today, layered on top of (not instead of) the
+  runner-specific block found above, echoing the same 502-class outage recorded earlier in this
+  document during the historical Elo backfill.
+- **`daily-snapshot.yml` now schedules `openfootball`, `footballdata`, and `understat`** (ingest +
+  stage) every day, each step independent (`continue-on-error: true`) so one source's outage never
+  blocks the others or the core FPL snapshot, followed by a daily `fpl facts` rebuild and
+  `fpl check --layer facts` (not continue-on-error — a real gate failure stops the job rather than
+  committing a broken facts table), then a `data/facts/` commit. A shared GitHub issue
+  (label `tier2-capture`) is raised/updated on any Tier 2 step or facts-check failure, mirroring
+  `capture-ownership.yml`'s single-issue-reuse pattern. **Club Elo is deliberately excluded from the
+  schedule** per the probe result above — it remains a manual/local-only capture
+  (`fpl ingest clubelo` / `fpl backfill-elo`) until its reachability improves; a future retry of
+  task 15 should be tried again if/when this is revisited.
+- **One-off 2026-27 catch-up run** (this session, local): Understat's `league_data` and
+  `match_backfill` (9 matches — everything played so far in GW1) both captured and staged
+  cleanly. Club Elo's catch-up attempt failed for the outage reason above (existing 2026-27 data —
+  one snapshot from 2026-08-03 — is unchanged). openfootball's 2026-27 archive fetch succeeded
+  (200 OK) but the `2026-27/` directory does not exist yet in `openfootball/champions-league`
+  (the repository only creates a season's directory once European fixtures for that season are
+  actually scheduled — expected to appear once the 2026-27 UEFA group stage is drawn/begins, not a
+  defect). football-data.co.uk's `mmz4281/2627/E0.csv` returned an HTML 404-style page rather than
+  a CSV — the season's results file evidently isn't published this early either. Both are expected,
+  legitimate absences at this point in the season, not bugs, and both will start capturing
+  automatically via the new daily schedule the moment each publisher adds 2026-27 data.
+  `facts/team_fixture` for 2026-27 was rebuilt (760 rows, unchanged row count — no new Tier 2 rows
+  landed this run beyond Understat, which isn't a `team_fixture` input) and `fpl check --layer
+  facts` passed clean.
+
 
 
 ## Cross-cutting
