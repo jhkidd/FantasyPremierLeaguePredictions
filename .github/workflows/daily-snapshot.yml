@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 # Never cancel: a cancelled run that has written one endpoint but not the other
 # leaves the commit half-made. Queue instead, and share one group with every
@@ -31,7 +32,7 @@ concurrency:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +48,43 @@ jobs:
         env:
           FPL_ENTRY_ID: ${{ vars.FPL_ENTRY_ID }}
         run: uv run fpl --verbose ingest fpl ${{ inputs.force && '--force' || '' }}
+
+      # Phase 7 Tier 2 context sources (plan §7). Club Elo is deliberately not
+      # here: a live runner probe (2026-08-24) found it unreachable on both
+      # HTTP and HTTPS from an Actions runner (TCP connects then silently
+      # drops the response on :80; :443 doesn't accept a connection at all),
+      # confirming Risk R1's stated fallback — Club Elo stays a manual/local
+      # capture until that changes.
+      #
+      # Each step below is independent (`continue-on-error: true`): one
+      # source being down must never block the others or the core FPL
+      # snapshot. Staging steps don't need to be gated on their ingest step's
+      # success — `fpl stage <source>` already reports a graceful "no capture
+      # on disk" result rather than raising when there's nothing new to
+      # stage. The final "Raise an issue" step below is what actually
+      # surfaces a real failure, rather than a green run hiding it.
+      - name: Ingest openfootball
+        id: ingest_openfootball
+        continue-on-error: true
+        run: uv run fpl --verbose ingest openfootball
+
+      - name: Ingest football-data.co.uk
+        id: ingest_footballdata
+        continue-on-error: true
+        run: uv run fpl --verbose ingest footballdata
+
+      - name: Ingest Understat league data
+        id: ingest_understat_league
+        continue-on-error: true
+        run: uv run fpl --verbose ingest understat
+
+      # 50/day at ~2s/match comfortably covers a full gameweek (~10 matches)
+      # plus catch-up room if a day is missed; resumable, so an interrupted
+      # or capped run picks up exactly where it left off tomorrow.
+      - name: Capture Understat per-match backfill
+        id: ingest_understat_matches
+        continue-on-error: true
+        run: uv run fpl --verbose ingest understat --endpoint match_backfill --limit 50
 
       # Raw lands on its own, before anything derived is attempted. Raw is the
       # unrecoverable artefact — FPL publishes only current values, so a day
@@ -75,6 +113,21 @@ jobs:
       - name: Stage
         run: uv run fpl --verbose stage fpl
 
+      - name: Stage openfootball
+        id: stage_openfootball
+        continue-on-error: true
+        run: uv run fpl --verbose stage openfootball
+
+      - name: Stage football-data.co.uk
+        id: stage_footballdata
+        continue-on-error: true
+        run: uv run fpl --verbose stage footballdata
+
+      - name: Stage Understat
+        id: stage_understat
+        continue-on-error: true
+        run: uv run fpl --verbose stage understat
+
       - name: Commit staged
         run: |
           set -euo pipefail
@@ -86,3 +139,80 @@ jobs:
           git commit -m "data: stage snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
           git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      # Rebuilds facts/player_fixture and facts/team_fixture from whatever
+      # was just staged. A gate failure here (key-uniqueness, leakage) must
+      # stop the job rather than silently commit a broken facts table, so
+      # neither of the next two steps has continue-on-error.
+      - name: Rebuild facts
+        id: facts_rebuild
+        run: uv run fpl --verbose facts
+
+      - name: Check facts
+        id: facts_check
+        run: uv run fpl --verbose check --layer facts
+
+      - name: Commit facts
+        run: |
+          set -euo pipefail
+          git add data/facts/
+          if git diff --cached --quiet; then
+            echo "Facts tables already current; nothing to commit."
+            exit 0
+          fi
+          git commit -m "data: facts snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      # A Tier 2 source failing must not turn the whole run red (that's the
+      # point of continue-on-error above) but must not go unnoticed either —
+      # one shared issue is reused across any of these steps failing, the
+      # same pattern capture-ownership.yml uses for its own unrecoverable
+      # capture.
+      - name: Raise an issue on Tier 2 capture failure
+        if: always()
+        env:
+          O_INGEST_OPENFOOTBALL: ${{ steps.ingest_openfootball.outcome }}
+          O_STAGE_OPENFOOTBALL: ${{ steps.stage_openfootball.outcome }}
+          O_INGEST_FOOTBALLDATA: ${{ steps.ingest_footballdata.outcome }}
+          O_STAGE_FOOTBALLDATA: ${{ steps.stage_footballdata.outcome }}
+          O_INGEST_UNDERSTAT_LEAGUE: ${{ steps.ingest_understat_league.outcome }}
+          O_INGEST_UNDERSTAT_MATCHES: ${{ steps.ingest_understat_matches.outcome }}
+          O_STAGE_UNDERSTAT: ${{ steps.stage_understat.outcome }}
+          O_FACTS_CHECK: ${{ steps.facts_check.outcome }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          failed=""
+          for name in INGEST_OPENFOOTBALL STAGE_OPENFOOTBALL INGEST_FOOTBALLDATA \
+                      STAGE_FOOTBALLDATA INGEST_UNDERSTAT_LEAGUE INGEST_UNDERSTAT_MATCHES \
+                      STAGE_UNDERSTAT FACTS_CHECK; do
+            var="O_${name}"
+            if [ "${!var}" = "failure" ]; then
+              failed="${failed} ${name}"
+            fi
+          done
+          if [ -z "$failed" ]; then
+            echo "All Tier 2 steps healthy."
+            exit 0
+          fi
+          title="Tier 2 context data capture failed"
+          existing=$(gh issue list --state open --label tier2-capture \
+            --json number --jq '.[0].number' || echo "")
+          body=$(printf '%s\n' \
+            "Run failed: ${RUN_URL}" \
+            "" \
+            "Failed step(s):${failed}" \
+            "" \
+            "Tier 2 sources (openfootball, football-data.co.uk, Understat) feed" \
+            "facts/team_fixture and the facts quality gate. A failure here degrades" \
+            "model context data quietly unless flagged (Phase 7 plan §7.15).")
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh label create tier2-capture --color b60205 \
+              --description "Tier 2 context source capture failure" 2>/dev/null || true
+            gh issue create --title "$title" --body "$body" --label tier2-capture
+          fi

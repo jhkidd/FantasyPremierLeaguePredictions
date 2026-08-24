@@ -55,6 +55,37 @@ just warning) on a violation?
 **Q:** Production code, or a prototype/ideation pass?
 **A:** Production — same rigor as the rest of `daily-snapshot.yml` / `capture-ownership.yml`.
 
+## Section 1b — Probe result and follow-up decision (2026-08-24)
+
+The throwaway probe (`.github/workflows/probe-clubelo-runner.yml`) was run twice on a real
+`ubuntu-latest` GitHub Actions runner:
+- Run 1 (unbounded): hung for the full 5-minute job timeout, cancelled, zero output.
+- Run 2 (bounded, with DNS + HTTP + HTTPS diagnostics): DNS resolved fine
+  (`api.clubelo.com` → `37.128.134.74`). **HTTP (port 80)**: TCP connect succeeded
+  ("Connected to api.clubelo.com ... port 80") but then 0 bytes were received in 15s
+  (`curl: (28) Operation timed out ... with 0 bytes received`) — the connection is accepted and
+  then silently blackholed, not a fast error. **HTTPS (port 443)**: the TCP connect itself timed
+  out within 8s — the port is not reachable at all.
+
+**Conclusion: Club Elo is not reliably reachable from a GitHub Actions runner**, on either scheme —
+worse than the sandbox's earlier 502 (Finding A), and confirming Risk R1's stated fallback.
+
+**Q:** Proceed with the other 3 sources + facts wiring, leaving Club Elo manual/local-only, or
+pause everything until a Club Elo workaround is found?
+**A:** Proceed without Club Elo in the daily workflow (openfootball + football-data.co.uk +
+Understat + facts rebuild/check only). Club Elo stays a manual/local-only capture for now,
+revisited later.
+
+**Revised scope for the rest of this task:**
+- The daily workflow gains `ingest`/`stage` steps for `openfootball`, `footballdata`, and
+  `understat` only — **no** `ingest_clubelo`/`stage_clubelo` steps, and no Club Elo entry in the
+  failure-issue check list.
+- The one-off manual catch-up backfill still includes Club Elo (steps in Section 2 below), run
+  from this local machine/session, not from Actions — local network egress to Club Elo already
+  works (the existing 2026-08-03 capture and this session's local `uv run fpl ingest clubelo`
+  calls are unaffected by the Actions-runner-specific block found above).
+- The probe workflow file has already been deleted (its job — answering R1 — is done).
+
 ## Locked design decisions (derived from the above + codebase investigation)
 
 - **CLI surface is already complete** — no new Python code needed, only workflow YAML + one-off
