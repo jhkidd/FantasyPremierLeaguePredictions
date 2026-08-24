@@ -1,0 +1,18 @@
+{
+  "cohort": null,
+  "compressed_bytes": 1214,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "entry",
+  "event": null,
+  "fetched_at": "2026-08-24T04:13:36.728382+00:00",
+  "http_status": 200,
+  "params": {
+    "entry_id": 2282251
+  },
+  "raw_bytes": 5513,
+  "season": "2026-27",
+  "sha256": "556c9d4a13a4593d8f7a189ed2cc037919949c9cbb37254a856bc7ac429e8a45",
+  "source": "fpl",
+  "url": "https://fantasy.premierleague.com/api/entry/2282251/"
+}
