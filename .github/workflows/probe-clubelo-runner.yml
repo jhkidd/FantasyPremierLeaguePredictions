@@ -1,0 +1,32 @@
+name: Probe Club Elo runner connectivity
+
+# Throwaway, one-off diagnostic (plan §7 Finding A / Risk R1). The sandbox's
+# own curl got a 502 from api.clubelo.com while a different tool succeeded,
+# which proves nothing about a real GitHub Actions runner's egress. This
+# workflow answers that question directly, then gets deleted once answered.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Curl Club Elo from this runner
+        run: |
+          set -euo pipefail
+          today="$(date -u +%F)"
+          echo "Requesting http://api.clubelo.com/${today}"
+          status=$(curl -sS -o /tmp/body.txt -w "%{http_code}" "http://api.clubelo.com/${today}")
+          echo "HTTP status: ${status}"
+          echo "First 300 bytes of body:"
+          head -c 300 /tmp/body.txt
+          echo
+          if [ "$status" != "200" ]; then
+            echo "Non-200 response; Club Elo is not reachable from this runner." >&2
+            exit 1
+          fi
