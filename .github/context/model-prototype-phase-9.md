@@ -758,6 +758,17 @@ is still empty and no season's `facts/player_fixture` has actually been rebuilt 
 `understat_*` values populated. This §3.1 item stays open until that refresh, hand-review, and a
 full ten-season facts rebuild have happened.
 
+**2026-08-24 follow-up — closed out:** ran `fpl crosswalk refresh`; 26/34 clubs' `understat_name`
+drafted automatically, the remaining 8 (Man Utd, Leicester, West Ham, West Brom, Brighton,
+Newcastle, Man City, Sheffield Utd) hit genuine token-ambiguity in the existing fuzzy matcher and
+were filled in by hand after user confirmation. `crosswalk validate-understat` still reports 12-22
+unmapped Understat players per season (pre-existing gap, ~798 unmatched player_codes overall — not
+new, not blocking). Staged Understat for all ten seasons, then rebuilt
+`facts/player_fixture`/`facts/team_fixture` for all ten — match rate 79-92% per season (tracks the
+player crosswalk's ~85% overall match rate). `fpl check --layer facts` passes clean for every
+season. §3.1 is now fully closed; the 798 unmatched players remain a known, separate follow-up
+(not scoped into this task).
+
 ### 3.2 Candidate algorithms, from the repo's own prior-art review
 
 | Source | Approach | Why it matters here |
