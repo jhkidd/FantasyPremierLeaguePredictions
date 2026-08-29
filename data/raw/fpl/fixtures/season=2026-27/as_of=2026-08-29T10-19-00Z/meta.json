@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 8182,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "fixtures",
+  "event": null,
+  "fetched_at": "2026-08-29T10:19:00.109252+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 143468,
+  "season": "2026-27",
+  "sha256": "6d2e21a761abf7b4b4bf155a282a1cb3e510acc020769cde59ee6ead1ab6f7f3",
+  "source": "fpl",
+  "url": "https://fantasy.premierleague.com/api/fixtures/"
+}
