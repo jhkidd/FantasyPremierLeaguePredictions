@@ -1,0 +1,19 @@
+{
+  "cohort": "mini",
+  "compressed_bytes": 930,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "league_standings",
+  "event": 3,
+  "fetched_at": "2026-09-04T19:04:14.172443+00:00",
+  "http_status": 200,
+  "params": {
+    "league_id": 464531,
+    "page": 1
+  },
+  "raw_bytes": 2613,
+  "season": "2026-27",
+  "sha256": "67331d0b6077e43dc7a8a1123b70471bf743916fedfda4a03a4c1155c24647a8",
+  "source": "fpl",
+  "url": "https://fantasy.premierleague.com/api/leagues-classic/464531/standings/?page_standings=1"
+}
