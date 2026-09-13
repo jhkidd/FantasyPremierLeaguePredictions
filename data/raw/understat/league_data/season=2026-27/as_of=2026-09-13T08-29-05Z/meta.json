@@ -1,0 +1,19 @@
+{
+  "cohort": null,
+  "compressed_bytes": 33569,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "league_data",
+  "event": null,
+  "fetched_at": "2026-09-13T08:29:05.221369+00:00",
+  "http_status": 200,
+  "params": {
+    "league": "EPL",
+    "season": 2026
+  },
+  "raw_bytes": 247792,
+  "season": "2026-27",
+  "sha256": "bdaff3507e1c728f2b13f54328aba85a6e3427af10cdb99c4146978f51666faf",
+  "source": "understat",
+  "url": "https://understat.com/getLeagueData/EPL/2026"
+}
