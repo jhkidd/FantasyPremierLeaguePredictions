@@ -1,0 +1,22 @@
+{
+  "chunk": 2,
+  "cohort": null,
+  "compressed_bytes": 4348,
+  "connector_version": "1",
+  "content_type": "ndjson",
+  "endpoint": "match_data",
+  "event": null,
+  "fetched_at": "2026-09-19T08:13:23.125587+00:00",
+  "http_status": 200,
+  "match_count": 1,
+  "params": {
+    "match_ids": [
+      31220
+    ]
+  },
+  "raw_bytes": 40341,
+  "season": "2026-27",
+  "sha256": "2ec2b56a98e80e63fc7409072ec41cb4bbaa969d62ff69b236472b884c5a47f5",
+  "source": "understat",
+  "url": "https://understat.com/getMatchData/{id}"
+}
