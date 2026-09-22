@@ -844,6 +844,33 @@ Per spec §9:
 - `src/fpl/training/` is imported by notebooks, never by Actions; `src/fpl/inference/` is imported by
   Actions and never fits
 
+**Closeout (`.github/context/subsystem3-close-and-mvp-site.md`, Phase C, 2026-09-22).** The
+registry/artefact contract above has landed, narrower than this sketch: per-component
+`models/active.json` + `metadata.json` (ordered feature list, training seasons, git SHA, but not
+yet a feature-registry hash or evaluation metrics in the artefact itself), `src/fpl/inference/`
+(`predict_next_gameweek`) reusing `predict_glm_baseline`/`assemble_predicted_points` unchanged, and
+`fpl train-glm`/`fpl predict` CLI commands. Still open: the walk-forward harness (§3.4), tuning
+(§3.3), monitoring (`data/monitoring/`), and the feature-schema hash.
+
+The frozen GLM was fit for real on 2016-17..2024-25 (223,762 rows) and its artefacts committed
+under `models/`. Running `fpl predict` for a genuinely live gameweek, however, surfaced a real gap
+one level down the stack, in the *ingestion* layer (subsystem 2), not this one: `daily-snapshot.yml`
+only ever pulls `bootstrap-static`/`fixtures`/`entry` for the live season, so
+`facts/player_fixture` has no `season=2026-27` rows yet even though five of its gameweeks have
+already been played — `stage/player_fixture_stats` is built only from vaastav's historical CSV
+archive, which does not cover the in-progress season, and there is no staging path yet from FPL's
+own `event/{event}/live/` endpoint (already ingestable via `fpl ingest fpl --endpoint event-live
+--event N`, ~1 request per gameweek) into that table. Every `naive_*` component therefore has zero
+within-season history to average, so `assemble_predicted_points` nulls out every row for the live
+season's next gameweek — not a bug in the code landed here, a genuine missing pipeline stage,
+carried forward as follow-up work. A past, already-fully-played season (e.g. 2025-26) cannot stand
+in for this either: `staged/players` (team/position/price) is only ever kept for the *current*
+season, overwritten daily rather than archived, so `features.library.build` has nothing to resolve
+a past season's roster against. The registry/inference code path itself is proven correct by the
+12 `tests/inference/` unit tests (including a synthetic end-to-end prediction) and the 8
+`tests/test_cli.py` tests for `train-glm`/`predict`, all against realistic synthetic data; a real,
+non-null predictions archive will follow once the live-season staging gap above is closed.
+
 ### 3.6 The single final test run
 
 The 2025-26 test split is touched **exactly once**, after the winning model and its hyperparameters

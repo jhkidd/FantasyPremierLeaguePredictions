@@ -108,6 +108,18 @@ and verify CI green (`gh run watch`) before the next step.
 8. Run the full test suite + lint clean. Run `fpl train-glm` for real (2016-17..2024-25) to produce
    the first committed artefact set, then `fpl predict` for the next unplayed 2026-27 gameweek to
    produce the first real predictions archive.
+
+   **Outcome (2026-09-22):** `train-glm` ran for real — 223,762 rows, 9 seasons, `models/`
+   committed. `predict` did not produce a usable archive: the live 2026-27 season is 5 gameweeks
+   in, but ingestion has never staged its per-player match stats (`daily-snapshot.yml` only pulls
+   `bootstrap-static`/`fixtures`/`entry`; `player_fixture_stats` is built solely from vaastav's
+   historical archive, which doesn't cover the live season), so every `naive_*` component has zero
+   within-season history and every row comes back null. A past season can't stand in either —
+   `staged/players` is only ever kept for the *current* season. Decided with the user: document the
+   gap here and in `model-prototype-phase-9.md` §3.5 as follow-up (closing the live-ingestion gap is
+   subsystem-2 scope), commit the real `models/` artefacts as-is, and proceed to Phase D/E — the
+   registry/inference code path is already proven by `tests/inference/` + the new CLI tests. No
+   predictions archive is committed this session.
 9. Docs closeout note in `.github/context/model-prototype-phase-9.md` §3.5 recording the registry
    contract has landed (narrower than the full spec — no walk-forward harness, no tuning yet).
 

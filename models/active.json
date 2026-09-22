@@ -1,0 +1,26 @@
+{
+  "assists": {
+    "model": "glm",
+    "version": "20260922T214528Z"
+  },
+  "bonus": {
+    "model": "glm",
+    "version": "20260922T214528Z"
+  },
+  "defensive_contribution": {
+    "model": "glm",
+    "version": "20260922T214528Z"
+  },
+  "goals_conceded": {
+    "model": "glm",
+    "version": "20260922T214528Z"
+  },
+  "goals_scored": {
+    "model": "glm",
+    "version": "20260922T214528Z"
+  },
+  "minutes": {
+    "model": "glm",
+    "version": "20260922T214528Z"
+  }
+}
