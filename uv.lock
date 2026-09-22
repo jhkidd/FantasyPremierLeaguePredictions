@@ -96,6 +96,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "joblib" },
     { name = "lightgbm" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -116,6 +117,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
+    { name = "joblib", specifier = ">=1.5.3" },
     { name = "lightgbm", specifier = ">=4.5" },
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "numpy", specifier = ">=2.5.2" },
