@@ -803,6 +803,18 @@ handle NaN natively, so the era-masked features excluded from the Phase A baseli
 random forests, and a hierarchical Bayesian Poisson model. Tree models also remove the need for
 scaling and one-hot encoding, so the team-identity question reopens.
 
+**2026-09-22 update:** a first LightGBM candidate has been trained and compared against the GLM
+baseline (`.github/context/gbm-baseline-phase-b.md`), position-specific and mirroring the GLM
+baseline's two-stage design exactly, but using the full (era-masked-inclusive) feature set and
+fixed, untuned hyperparameters. `fpl gbm-baseline` writes the side-by-side comparison to
+`docs/model-prototype-gbm.md`. Result: LightGBM improves nearly every per-(component, position)
+regression metric over the GLM baseline, but the *assembled* system score and rank correlation are
+both worse (overall predicted-points MAE 1.37 vs 1.23; mean gameweek Spearman 0.61 vs 0.65) — better
+component-level accuracy did not translate into a better player-selection signal with untuned
+hyperparameters. This is one data point, not a verdict against trees: tuning (§3.3), the
+walk-forward backtest harness (§3.4), the model registry/artefact contract (§3.5), and the final
+test-split read (§3.6) all remain open, and any of them could change this picture.
+
 ### 3.3 Tuning strategy
 
 Bayesian optimisation (e.g. `optuna`) over the validation split, with the search space and the number
