@@ -33,6 +33,7 @@ from fpl.scoring.base import PlayerFixtureRow
 from fpl.training.baseline import GLM_COMPONENTS
 
 __all__ = [
+    "NAIVE_ONLY_COMPONENTS",
     "OUTCOME_BUCKETS",
     "assemble_predicted_points",
     "component_regression_metrics",
@@ -46,8 +47,11 @@ __all__ = [
 OUTCOME_BUCKETS: tuple[str, ...] = ("zeros", "blanks", "tickers", "haulers")
 
 # The scoring inputs GLM never models (plan Q20) - the naive baseline is
-# their only predictor, fed straight into the system-score assembly.
-_NAIVE_ONLY_COMPONENTS: tuple[str, ...] = (
+# their only predictor, fed straight into the system-score assembly. Public
+# (not module-private) so fpl.inference.naive (Phase C step 5,
+# `.github/context/subsystem3-close-and-mvp-site.md`) can share this exact
+# set rather than risk an independently-hardcoded copy drifting out of sync.
+NAIVE_ONLY_COMPONENTS: tuple[str, ...] = (
     "saves",
     "yellow_cards",
     "red_cards",
@@ -139,7 +143,7 @@ def assemble_predicted_points(
     *,
     model_prefix: str = "glm",
     glm_components: tuple[str, ...] = GLM_COMPONENTS,
-    naive_components: tuple[str, ...] = _NAIVE_ONLY_COMPONENTS,
+    naive_components: tuple[str, ...] = NAIVE_ONLY_COMPONENTS,
 ) -> pl.DataFrame:
     """Return ``frame`` with one new ``predicted_total_points_fpl`` column:
     every predicted component - ``<model_prefix>_minutes`` and a
