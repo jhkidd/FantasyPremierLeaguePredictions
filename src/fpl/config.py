@@ -108,6 +108,12 @@ SOURCES: Final[dict[str, SourceConfig]] = {
 
 DEFAULT_DATA_ROOT: Final = Path("data")
 DATA_ROOT_ENV_VAR: Final = "FPL_DATA_ROOT"
+DEFAULT_MODELS_ROOT: Final = Path("models")
+MODELS_ROOT_ENV_VAR: Final = "FPL_MODELS_ROOT"
+"""``models/`` is a sibling of ``data/`` at the repo root, not a subtree of it
+(spec §9) - a model artefact is a committed build output tied to the code
+that produced it, not a data-layer table, so it gets its own root rather than
+living under ``data/models/``."""
 MINI_LEAGUE_ENV_VAR: Final = "FPL_MINI_LEAGUE_ID"
 ENTRY_ENV_VAR: Final = "FPL_ENTRY_ID"
 FOOTBALL_DATA_API_KEY_ENV_VAR: Final = "FOOTBALL_DATA_API_KEY"
@@ -124,6 +130,7 @@ matters for a feature used comparatively (spec §6.1)."""
 @dataclass(frozen=True)
 class Config:
     data_root: Path
+    models_root: Path = DEFAULT_MODELS_ROOT
     user_agent: str = USER_AGENT
     mini_league_id: int | None = None
     """The user's own mini-league. Configuration rather than a constant because
@@ -150,8 +157,11 @@ class Config:
         """
         raw_root = os.environ.get(DATA_ROOT_ENV_VAR)
         data_root = Path(raw_root) if raw_root else DEFAULT_DATA_ROOT
+        raw_models_root = os.environ.get(MODELS_ROOT_ENV_VAR)
+        models_root = Path(raw_models_root) if raw_models_root else DEFAULT_MODELS_ROOT
         return cls(
             data_root=data_root,
+            models_root=models_root,
             mini_league_id=_read_positive_int(MINI_LEAGUE_ENV_VAR),
             entry_id=_read_positive_int(ENTRY_ENV_VAR),
             football_data_api_key=_read_secret(FOOTBALL_DATA_API_KEY_ENV_VAR),

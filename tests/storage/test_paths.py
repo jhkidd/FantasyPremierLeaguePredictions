@@ -205,3 +205,50 @@ class TestStagedAndFactsPaths:
         assert paths.facts_table("points", SEASON, rules="2025-26") != paths.facts_table(
             "points", SEASON, rules="2026-27"
         )
+
+
+class TestModelArtefactDir:
+    def test_expected_layout(self, isolated_models_root: Path) -> None:
+        assert paths.model_artefact_dir("minutes", "glm", "2026-09-22") == (
+            isolated_models_root / "minutes" / "glm-2026-09-22"
+        )
+
+    def test_models_root_override_wins_over_environment(self, tmp_path: Path) -> None:
+        explicit = tmp_path / "explicit-models"
+        result = paths.model_artefact_dir("minutes", "glm", "v1", models_root=explicit)
+        assert result.is_relative_to(explicit)
+
+    @pytest.mark.parametrize("bad", ["../escape", "a/b", "a\\b", "", "with:colon"])
+    def test_rejects_illegal_component_name(self, bad: str) -> None:
+        with pytest.raises(ValueError):
+            paths.model_artefact_dir(bad, "glm", "v1")
+
+    def test_models_root_is_a_sibling_of_data_root_by_default(
+        self, isolated_data_root: Path, isolated_models_root: Path
+    ) -> None:
+        """``models/`` is not nested under ``data/`` (spec §9) - a model
+        artefact is a build output tied to the code, not a data-layer table."""
+        assert not paths.model_artefact_dir("minutes", "glm", "v1").is_relative_to(
+            isolated_data_root
+        )
+
+
+class TestModelsActivePointer:
+    def test_expected_layout(self, isolated_models_root: Path) -> None:
+        assert paths.models_active_pointer() == isolated_models_root / "active.json"
+
+    def test_models_root_override_wins_over_environment(self, tmp_path: Path) -> None:
+        explicit = tmp_path / "explicit-models"
+        assert paths.models_active_pointer(models_root=explicit) == explicit / "active.json"
+
+
+class TestPredictionsPartition:
+    def test_expected_layout(self, isolated_data_root: Path) -> None:
+        assert paths.predictions_partition(SEASON, MOMENT) == (
+            isolated_data_root / "predictions" / "season=2026-27" / "as_of=2026-08-01T03-30-00Z"
+        )
+
+    def test_data_root_override_wins_over_environment(self, tmp_path: Path) -> None:
+        explicit = tmp_path / "explicit-data"
+        result = paths.predictions_partition(SEASON, MOMENT, data_root=explicit)
+        assert result.is_relative_to(explicit)

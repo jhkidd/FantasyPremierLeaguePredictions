@@ -19,6 +19,16 @@ def isolated_data_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Itera
 
 
 @pytest.fixture(autouse=True)
+def isolated_models_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Point FPL_MODELS_ROOT at a temp directory for every test, mirroring
+    ``isolated_data_root`` - a test that accidentally wrote to the real
+    committed ``models/`` tree would be just as destructive."""
+    root = tmp_path / "models"
+    monkeypatch.setenv("FPL_MODELS_ROOT", str(root))
+    yield root
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """Unset the team and league variables for every test.
 

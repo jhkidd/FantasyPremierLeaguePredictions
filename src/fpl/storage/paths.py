@@ -27,6 +27,9 @@ __all__ = [
     "iter_as_of_partitions",
     "iter_chunks",
     "latest_partition",
+    "model_artefact_dir",
+    "models_active_pointer",
+    "predictions_partition",
     "raw_endpoint_dir",
     "raw_partition",
     "staged_table",
@@ -71,6 +74,10 @@ def _normalise_endpoint(endpoint: str) -> str:
 
 def _root(data_root: Path | None) -> Path:
     return data_root if data_root is not None else Config.load().data_root
+
+
+def _models_root(models_root: Path | None) -> Path:
+    return models_root if models_root is not None else Config.load().models_root
 
 
 def raw_endpoint_dir(
@@ -271,3 +278,36 @@ def data_eda_dir(*, data_root: Path | None = None) -> Path:
     small, reviewable evidence behind ``docs/model-prototype-eda.md`` (plan
     Phase A, Step 26/27), not a large trivially-rebuilt intermediate."""
     return _root(data_root) / "eda"
+
+
+def model_artefact_dir(
+    component: str, model_name: str, version: str, *, models_root: Path | None = None
+) -> Path:
+    """One fitted artefact's directory: ``models/<component>/<model_name>-<version>/``.
+
+    ``component`` is the prediction target the artefact serves (e.g.
+    ``"minutes"``, ``"goals_scored"``) — the registry's granularity is
+    per-component (spec §3.5, `.github/context/subsystem3-close-and-mvp-site.md`),
+    so a future model swap for just one component is a one-line
+    ``models/active.json`` diff rather than touching every other component's
+    artefact."""
+    return (
+        _models_root(models_root)
+        / _check_component(component, label="component")
+        / f"{_check_component(model_name, label='model name')}-{version}"
+    )
+
+
+def models_active_pointer(*, models_root: Path | None = None) -> Path:
+    """The registry pointer file: ``models/active.json`` (spec §9/§3.5),
+    resolving the live artefact per component."""
+    return _models_root(models_root) / "active.json"
+
+
+def predictions_partition(
+    season: Season, as_of: datetime, *, data_root: Path | None = None
+) -> Path:
+    """One inference run's archive: ``data/predictions/season=.../as_of=.../``
+    (spec §9) — append-only, version-stamped by the producing model, and the
+    same artefact the Pages app reads."""
+    return _root(data_root) / "predictions" / f"season={season}" / f"as_of={encode_as_of(as_of)}"
