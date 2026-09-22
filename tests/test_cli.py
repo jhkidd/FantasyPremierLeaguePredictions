@@ -1073,6 +1073,258 @@ class TestGbmBaselineCommand:
         assert "| lgbm |" in report_text
 
 
+class TestTrainGlmCommand:
+    """CLI surface for Phase C step 6: freezing the GLM baseline as the
+    production model registry (`.github/context/subsystem3-close-and-mvp-site.md`)."""
+
+    _facts = TestBaselineCommand._facts
+
+    def test_no_matrix_available_skips(self, isolated_data_root: Path) -> None:
+        result = runner.invoke(app, ["--data-root", str(isolated_data_root), "train-glm"])
+
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "skipped" in result.output
+
+    def test_malformed_season_is_rejected(self, isolated_data_root: Path) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "train-glm",
+                "--seasons",
+                "not-a-season",
+            ],
+        )
+
+        assert result.exit_code != exit_codes.SUCCESS
+
+    def test_writes_artefacts_and_active_pointer(
+        self, isolated_data_root: Path, isolated_models_root: Path
+    ) -> None:
+        self._facts(isolated_data_root, "2016-17", 30)
+        self._facts(isolated_data_root, "2024-25", 15)
+
+        result = runner.invoke(
+            app,
+            ["--data-root", str(isolated_data_root), "train-glm", "--version", "v-test"],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert "artefacts written as version 'v-test'" in result.output
+        assert "no 2026-27 facts built yet" in result.output
+
+        pointer = json.loads((isolated_models_root / "active.json").read_text(encoding="utf-8"))
+        assert pointer["minutes"] == {"model": "glm", "version": "v-test"}
+        assert pointer["bonus"] == {"model": "glm", "version": "v-test"}
+        assert (isolated_models_root / "minutes" / "glm-v-test" / "model.joblib").exists()
+
+    def test_custom_seasons_option_restricts_training_rows(self, isolated_data_root: Path) -> None:
+        self._facts(isolated_data_root, "2016-17", 30)
+        self._facts(isolated_data_root, "2024-25", 15)
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "train-glm",
+                "--seasons",
+                "2016-17",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert "across 1 season(s)" in result.output
+
+    def test_freshness_check_reported_when_live_season_facts_exist(
+        self, isolated_data_root: Path
+    ) -> None:
+        self._facts(isolated_data_root, "2016-17", 30)
+        self._facts(isolated_data_root, "2024-25", 15)
+        self._facts(isolated_data_root, "2026-27", 5)
+
+        result = runner.invoke(app, ["--data-root", str(isolated_data_root), "train-glm"])
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert "freshness check on" in result.output
+        assert "not gating" in result.output
+
+
+class TestPredictCommand:
+    """CLI surface for Phase C step 7: producing and archiving predictions
+    from the active model registry (`.github/context/subsystem3-close-and-mvp-site.md`)."""
+
+    def _save_bundle(self, models_root: Path, feature_column: str, *, version: str = "v1") -> None:
+        """A GLM bundle whose sole feature is ``feature_column`` - mirrors
+        ``tests/inference/test_predict.py``'s helper of the same name, which
+        documents why an arbitrary single real feature column is enough."""
+        import polars as pl
+
+        from fpl.scoring.base import POSITIONS
+        from fpl.training.baseline import GLM_COMPONENTS, MINUTES_TARGET, fit_glm_baseline
+        from fpl.training.registry import (
+            COMPONENT_NAMES,
+            save_component_artefact,
+            write_active_pointer,
+        )
+
+        rows = [
+            {
+                "position": position,
+                "obs_defensive": True,
+                "obs_bps_inputs": True,
+                "obs_expected": True,
+                "obs_starts": True,
+                feature_column: float(i % 3),
+                "label_minutes": 90.0,
+                "label_goals_scored": float(i % 2),
+                "label_assists": float(i % 2),
+                "label_goals_conceded": 1.0,
+                "label_bonus": float(i % 3),
+                "label_defensive_contribution": float(i % 4),
+            }
+            for position in sorted(POSITIONS)
+            for i in range(10)
+        ]
+        train_frame = pl.DataFrame(rows)
+        bundle = fit_glm_baseline(train_frame)
+
+        write_active_pointer(
+            {component: {"model": "glm", "version": version} for component in COMPONENT_NAMES},
+            models_root=models_root,
+        )
+        save_component_artefact(
+            MINUTES_TARGET,
+            "glm",
+            version,
+            bundle.minutes_models,
+            feature_columns=bundle.feature_columns,
+            models_root=models_root,
+        )
+        for component in GLM_COMPONENTS:
+            models_for_component = {
+                position: pipeline
+                for (comp, position), pipeline in bundle.component_models.items()
+                if comp == component
+            }
+            save_component_artefact(
+                component,
+                "glm",
+                version,
+                models_for_component,
+                feature_columns=bundle.feature_columns,
+                models_root=models_root,
+            )
+
+    def _write_players(self, data_root: Path, season: Season, rows: list[dict]) -> None:
+        import polars as pl
+
+        from fpl.storage import paths
+        from fpl.storage.parquet_io import write_parquet
+
+        out_dir = paths.staged_table("players", season, data_root=data_root)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_parquet(pl.DataFrame(rows), out_dir / "part.parquet")
+
+    def _write_fixtures(self, data_root: Path, season: Season, rows: list[dict]) -> None:
+        import polars as pl
+
+        from fpl.storage import paths
+        from fpl.storage.parquet_io import write_parquet
+
+        out_dir = paths.staged_table("fixtures", season, data_root=data_root)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_parquet(pl.DataFrame(rows), out_dir / "part.parquet")
+
+    def test_no_active_model_fails_cleanly(
+        self, isolated_data_root: Path, isolated_models_root: Path
+    ) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "predict",
+                "--season",
+                "2025-26",
+                "--as-of",
+                "2025-08-20T00:00:00Z",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.FAILURE
+        assert "active.json" in result.output
+
+    def test_no_staged_data_skips_with_failure_exit(
+        self, isolated_data_root: Path, isolated_models_root: Path
+    ) -> None:
+        self._save_bundle(isolated_models_root, "goals_scored_sum_last_3")
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "predict",
+                "--season",
+                "2025-26",
+                "--as-of",
+                "2025-08-20T00:00:00Z",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.FAILURE
+        assert "predict: skipped" in result.output
+
+    def test_predicts_and_archives_to_the_predictions_partition(
+        self, isolated_data_root: Path, isolated_models_root: Path
+    ) -> None:
+        from fpl.storage import paths
+
+        season = Season(2025)
+        self._save_bundle(isolated_models_root, "goals_scored_sum_last_3")
+        self._write_players(
+            isolated_data_root,
+            season,
+            [{"player_id": 1, "team_id": 3, "element_type": 3, "now_cost": 75}],
+        )
+        self._write_fixtures(
+            isolated_data_root,
+            season,
+            [
+                {
+                    "fixture_id": 501,
+                    "event": 2,
+                    "kickoff_time": "2025-08-23T14:00:00Z",
+                    "team_h": 3,
+                    "team_a": 7,
+                    "finished": False,
+                }
+            ],
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "predict",
+                "--season",
+                "2025-26",
+                "--as-of",
+                "2025-08-20T00:00:00Z",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert "1 row(s) written to" in result.output
+        out_path = paths.predictions_partition(
+            season, datetime(2025, 8, 20, tzinfo=UTC), data_root=isolated_data_root
+        )
+        assert (out_path / "part.parquet").exists()
+
+
 class TestBackfillEloCommand:
     """CLI surface for the historical Club Elo backfill (plan §0.6, Step 14).
 

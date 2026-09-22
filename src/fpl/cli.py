@@ -62,6 +62,7 @@ from fpl.identity.team_external_ids import (
     write_team_external_ids,
 )
 from fpl.identity.teams import build_teams_crosswalk, write_teams_crosswalk
+from fpl.inference.predict import predict_next_gameweek
 from fpl.ingest import ingest_fpl
 from fpl.ownership import (
     COHORTS,
@@ -105,6 +106,7 @@ from fpl.storage.parquet_io import read_parquet, write_parquet
 from fpl.storage.raw_io import write_raw
 from fpl.training.baseline import (
     GLM_COMPONENTS,
+    MINUTES_TARGET,
     fit_glm_baseline,
     naive_rolling_mean_predictions,
     predict_glm_baseline,
@@ -128,7 +130,8 @@ from fpl.training.evaluation import (
 )
 from fpl.training.gbm_baseline import fit_gbm_baseline, predict_gbm_baseline
 from fpl.training.gbm_report import render_gbm_report
-from fpl.training.splits import VALIDATION_SEASON, chronological_split
+from fpl.training.registry import COMPONENT_NAMES, save_component_artefact, write_active_pointer
+from fpl.training.splits import TRAIN_SEASONS, VALIDATION_SEASON, chronological_split
 from fpl.understat_capture import capture_league_data, capture_match_data
 
 app = typer.Typer(
@@ -152,6 +155,10 @@ def _pending(phase: int, what: str) -> None:
 
 def _data_root(ctx: typer.Context) -> Path | None:
     return (ctx.obj or {}).get("data_root")
+
+
+def _models_root(ctx: typer.Context) -> Path | None:
+    return (ctx.obj or {}).get("models_root")
 
 
 @contextmanager
@@ -211,9 +218,13 @@ def main(
         Path | None,
         typer.Option("--data-root", help="Override the data directory."),
     ] = None,
+    models_root: Annotated[
+        Path | None,
+        typer.Option("--models-root", help="Override the models directory."),
+    ] = None,
 ) -> None:
     log.configure(verbose=verbose)
-    ctx.obj = {"data_root": data_root}
+    ctx.obj = {"data_root": data_root, "models_root": models_root}
 
 
 @app.command()
@@ -1236,6 +1247,169 @@ def gbm_baseline(
         f"gbm-baseline: {validation.height} validation row(s) evaluated, report written to "
         f"{resolved_report_path}"
     )
+
+
+# 2016-17..2024-25 - Split B's train + validation combined (plan Q3,
+# `.github/context/subsystem3-close-and-mvp-site.md`), the frozen
+# production model's own training range. The 2025-26 test season stays
+# untouched (spec §3.6 - touched exactly once, later); the live
+# CURRENT_SEASON is scored as a freshness check only, never trained on.
+_PRODUCTION_TRAIN_SEASONS: tuple[str, ...] = (*TRAIN_SEASONS, VALIDATION_SEASON)
+
+
+def _components_for_bundle(bundle) -> dict[str, dict]:
+    """Every :data:`~fpl.training.registry.COMPONENT_NAMES` name mapped to
+    its own ``{position: fitted predictor}`` slice of ``bundle`` - the
+    registry's per-component save granularity (spec §3.5)."""
+    components: dict[str, dict] = {MINUTES_TARGET: bundle.minutes_models}
+    for component in GLM_COMPONENTS:
+        components[component] = {
+            position: pipeline
+            for (comp, position), pipeline in bundle.component_models.items()
+            if comp == component
+        }
+    return components
+
+
+@app.command("train-glm")
+def train_glm(
+    ctx: typer.Context,
+    seasons: Annotated[
+        str,
+        typer.Option(
+            "--seasons",
+            help=(
+                "Comma-separated seasons to train on, e.g. 2016-17,2017-18. Defaults to "
+                f"{_PRODUCTION_TRAIN_SEASONS[0]}..{_PRODUCTION_TRAIN_SEASONS[-1]} "
+                "(train + validation combined)."
+            ),
+        ),
+    ] = "",
+    version: Annotated[
+        str,
+        typer.Option("--version", help="Artefact version tag. Defaults to a UTC timestamp."),
+    ] = "",
+) -> None:
+    """Fit the GLM baseline as the frozen production model, write each
+    component's artefact plus ``models/active.json``, and report a
+    freshness check against however many ``CURRENT_SEASON`` gameweeks are
+    already in ``facts/player_fixture`` - genuinely new data no split has
+    seen before, reported only, never gating the write above (Phase C
+    step 6, `.github/context/subsystem3-close-and-mvp-site.md`).
+
+    Builds/loads the training matrix the same way ``fpl dataset``/``fpl
+    baseline`` do if ``data/training/matrix.parquet`` is not already
+    present."""
+    data_root = _data_root(ctx)
+    models_root = _models_root(ctx)
+    resolved_version = version or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    resolved_seasons = (
+        tuple(s.strip() for s in seasons.split(",") if s.strip())
+        if seasons
+        else _PRODUCTION_TRAIN_SEASONS
+    )
+    for season_text in resolved_seasons:
+        _parse_season(season_text)  # validates, raising typer.BadParameter on malformed input
+
+    matrix = _load_or_build_training_matrix(data_root)
+    if matrix is None:
+        typer.echo("train-glm: skipped, no training matrix available yet (run `fpl dataset` first)")
+        return
+
+    train_frame = matrix.filter(pl.col("season").is_in(list(resolved_seasons)))
+    if train_frame.height == 0:
+        typer.echo(f"train-glm: skipped, no training matrix rows for season(s) {resolved_seasons}")
+        return
+
+    bundle = fit_glm_baseline(train_frame)
+    components = _components_for_bundle(bundle)
+
+    for component in COMPONENT_NAMES:
+        save_component_artefact(
+            component,
+            "glm",
+            resolved_version,
+            components[component],
+            feature_columns=bundle.feature_columns,
+            extra_metadata={"training_seasons": list(resolved_seasons)},
+            models_root=models_root,
+        )
+    write_active_pointer(
+        {component: {"model": "glm", "version": resolved_version} for component in COMPONENT_NAMES},
+        models_root=models_root,
+    )
+
+    typer.echo(
+        f"train-glm: fit on {train_frame.height} row(s) across {len(resolved_seasons)} "
+        f"season(s), artefacts written as version {resolved_version!r}"
+    )
+
+    live_facts_path = (
+        paths.facts_table("player_fixture", CURRENT_SEASON, data_root=data_root) / "part.parquet"
+    )
+    if not live_facts_path.exists():
+        typer.echo(f"train-glm: no {CURRENT_SEASON} facts built yet for a freshness check")
+        return
+
+    live_matrix = build_training_matrix([CURRENT_SEASON], data_root=data_root)
+    if live_matrix.height == 0:
+        typer.echo(f"train-glm: no {CURRENT_SEASON} rows yet for a freshness check")
+        return
+
+    live_with_glm = predict_glm_baseline(bundle, live_matrix)
+    live_with_predictions = naive_rolling_mean_predictions(live_with_glm)
+    live_scored = assemble_predicted_points(live_with_predictions)
+    overall = (
+        points_error_report(live_scored).filter(pl.col("bucket") == "overall").row(0, named=True)
+    )
+
+    typer.echo(
+        f"train-glm: freshness check on {live_matrix.height} row(s) from {CURRENT_SEASON} - "
+        f"MAE={overall['mae']}, RMSE={overall['rmse']} (reported only, not gating)"
+    )
+
+
+@app.command()
+def predict(
+    ctx: typer.Context,
+    season: SeasonOption = str(CURRENT_SEASON),
+    as_of: Annotated[
+        str, typer.Option("--as-of", help="ISO 8601 instant, UTC. Defaults to now.")
+    ] = "",
+    horizon_gameweeks: Annotated[
+        int, typer.Option("--horizon-gameweeks", help="Gameweeks ahead.")
+    ] = 1,
+) -> None:
+    """Predict the upcoming gameweek(s) with the active model registry and
+    archive the result to ``data/predictions/season=.../as_of=.../part.parquet``
+    (Phase C step 7, `.github/context/subsystem3-close-and-mvp-site.md`) -
+    the artefact both the optimiser and the Pages site read."""
+    parsed_season = _parse_season(season)
+    moment = _parse_as_of(as_of) if as_of else datetime.now(UTC)
+    data_root = _data_root(ctx)
+    models_root = _models_root(ctx)
+
+    try:
+        predictions = predict_next_gameweek(
+            parsed_season,
+            moment,
+            horizon_gameweeks=horizon_gameweeks,
+            data_root=data_root,
+            models_root=models_root,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        typer.secho(f"predict: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(exit_codes.FAILURE) from exc
+
+    if predictions.height == 0:
+        typer.secho("predict: skipped, nothing to predict in the requested horizon", err=True)
+        raise typer.Exit(exit_codes.FAILURE)
+
+    out_dir = paths.predictions_partition(parsed_season, moment, data_root=data_root)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    write_parquet(predictions, out_dir / "part.parquet")
+
+    typer.echo(f"predict: {predictions.height} row(s) written to {out_dir / 'part.parquet'}")
 
 
 def _rules_for_season(season: Season) -> str:
