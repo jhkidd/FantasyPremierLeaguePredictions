@@ -104,10 +104,12 @@ class TestComponentRegressionMetrics:
         assert metrics == {"mae": None, "rmse": None, "poisson_deviance": None, "n": 0}
 
 
-def _perfect_prediction_row(*, season: str, position: str) -> dict:
+def _perfect_prediction_row(*, season: str, position: str, model_prefix: str = "glm") -> dict:
     """A row whose actual scoring inputs are known, with every predicted
     column set to exactly that actual value - the invariant the plan's
-    Step 30 unit test calls for."""
+    Step 30 unit test calls for. ``model_prefix`` lets this same fixture
+    exercise either the GLM baseline's ``glm_``-prefixed columns or
+    another model's (e.g. Phase B's ``lgbm_``) equally."""
     actual = PlayerFixtureRow(
         position=position,
         minutes=75,
@@ -132,12 +134,12 @@ def _perfect_prediction_row(*, season: str, position: str) -> dict:
         "event": 1,
         "position": position,
         "label_total_points_fpl": float(realised_total),
-        "glm_minutes": float(actual.minutes),
-        "glm_goals_scored": float(actual.goals_scored),
-        "glm_assists": float(actual.assists),
-        "glm_goals_conceded": float(actual.goals_conceded),
-        "glm_bonus": float(actual.bonus),
-        "glm_defensive_contribution": float(actual.cbi),
+        f"{model_prefix}_minutes": float(actual.minutes),
+        f"{model_prefix}_goals_scored": float(actual.goals_scored),
+        f"{model_prefix}_assists": float(actual.assists),
+        f"{model_prefix}_goals_conceded": float(actual.goals_conceded),
+        f"{model_prefix}_bonus": float(actual.bonus),
+        f"{model_prefix}_defensive_contribution": float(actual.cbi),
         "naive_saves": float(actual.saves),
         "naive_yellow_cards": float(actual.yellow_cards),
         "naive_red_cards": float(actual.red_cards),
@@ -177,6 +179,33 @@ class TestAssemblePredictedPoints:
 
         with pytest.raises(ValueError, match="missing column"):
             assemble_predicted_points(frame)
+
+    def test_model_prefix_reads_that_prefix_s_columns(self) -> None:
+        """A non-default ``model_prefix`` (e.g. Phase B's LightGBM
+        candidate) must be read from its own ``<prefix>_<target>``
+        columns, not the default ``glm_`` ones - proving this function is
+        genuinely reusable for any model sharing the naming convention,
+        not just accidentally tolerant of extra columns."""
+        frame = pl.DataFrame(
+            [
+                _perfect_prediction_row(season="2016-17", position="MID", model_prefix="lgbm"),
+                _perfect_prediction_row(season="2025-26", position="DEF", model_prefix="lgbm"),
+            ]
+        )
+
+        result = assemble_predicted_points(frame, model_prefix="lgbm")
+
+        assert result["predicted_total_points_fpl"].to_list() == pytest.approx(
+            result["label_total_points_fpl"].to_list()
+        )
+
+    def test_model_prefix_raises_on_missing_columns_for_that_prefix(self) -> None:
+        """The default ``glm_`` columns being present must not satisfy a
+        request for ``lgbm_`` columns."""
+        frame = pl.DataFrame([_perfect_prediction_row(season="2016-17", position="MID")])
+
+        with pytest.raises(ValueError, match="missing column"):
+            assemble_predicted_points(frame, model_prefix="lgbm")
 
 
 class TestPointsErrorReport:

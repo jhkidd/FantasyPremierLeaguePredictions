@@ -137,33 +137,43 @@ def component_regression_metrics(
 def assemble_predicted_points(
     frame: pl.DataFrame,
     *,
+    model_prefix: str = "glm",
     glm_components: tuple[str, ...] = GLM_COMPONENTS,
     naive_components: tuple[str, ...] = _NAIVE_ONLY_COMPONENTS,
 ) -> pl.DataFrame:
     """Return ``frame`` with one new ``predicted_total_points_fpl`` column:
-    every predicted component - ``glm_minutes`` and a ``glm_<component>``
-    for each of ``glm_components``, a ``naive_<component>`` for each of
-    ``naive_components`` - combined through that row's own season's ruleset
+    every predicted component - ``<model_prefix>_minutes`` and a
+    ``<model_prefix>_<component>`` for each of ``glm_components``, a
+    ``naive_<component>`` for each of ``naive_components`` - combined
+    through that row's own season's ruleset
     (:func:`ruleset_name_for_season`).
 
-    The single ``glm_defensive_contribution`` prediction is passed as
-    ``PlayerFixtureRow.cbi`` with ``tackles``/``recoveries`` at 0: the
-    training matrix's own ``label_defensive_contribution`` is already the
-    position-dependent combined sum (``cbi + tackles`` for defenders,
-    ``cbi + tackles + recoveries`` for midfielders/forwards -
+    ``model_prefix`` defaults to ``"glm"`` (Phase A's own baseline) but is
+    equally the predicted-column prefix any other two-stage model uses -
+    e.g. ``"lgbm"`` for :mod:`fpl.training.gbm_baseline`'s predictions
+    (Phase B §3.2) - since every such model already shares the GLM
+    baseline's ``predict_*`` naming convention
+    (``<model_prefix>_<target>``) precisely so this function does not need
+    a separate copy per model.
+
+    The single ``<model_prefix>_defensive_contribution`` prediction is
+    passed as ``PlayerFixtureRow.cbi`` with ``tackles``/``recoveries`` at
+    0: the training matrix's own ``label_defensive_contribution`` is
+    already the position-dependent combined sum (``cbi + tackles`` for
+    defenders, ``cbi + tackles + recoveries`` for midfielders/forwards -
     :mod:`fpl.quality.checks`'s own formula gate), so
     :func:`fpl.scoring.base.defensive_contribution_points`'s threshold
     check on that single combined value is identical to checking the three
     real components separately.
 
     A row missing any required prediction (e.g. a player's still-null
-    first-fixture naive prediction, or a GLM component with no fitted model
-    for that row's position) gets a null ``predicted_total_points_fpl``
+    first-fixture naive prediction, or a model component with no fitted
+    model for that row's position) gets a null ``predicted_total_points_fpl``
     rather than one assembled from partial data.
     """
     required_columns = [
-        "glm_minutes",
-        *(f"glm_{component}" for component in glm_components),
+        f"{model_prefix}_minutes",
+        *(f"{model_prefix}_{component}" for component in glm_components),
         *(f"naive_{component}" for component in naive_components),
     ]
     missing = [column for column in required_columns if column not in frame.columns]
@@ -179,18 +189,18 @@ def assemble_predicted_points(
         rules = ruleset_for_name(ruleset_name_for_season(row["season"]))
         predicted_row = PlayerFixtureRow(
             position=row["position"],
-            minutes=max(0.0, row["glm_minutes"]),
-            goals_scored=row["glm_goals_scored"],
-            assists=row["glm_assists"],
-            goals_conceded=row["glm_goals_conceded"],
+            minutes=max(0.0, row[f"{model_prefix}_minutes"]),
+            goals_scored=row[f"{model_prefix}_goals_scored"],
+            assists=row[f"{model_prefix}_assists"],
+            goals_conceded=row[f"{model_prefix}_goals_conceded"],
             own_goals=row["naive_own_goals"],
             penalties_saved=row["naive_penalties_saved"],
             penalties_missed=row["naive_penalties_missed"],
             yellow_cards=row["naive_yellow_cards"],
             red_cards=row["naive_red_cards"],
             saves=row["naive_saves"],
-            bonus=row["glm_bonus"],
-            cbi=row["glm_defensive_contribution"],
+            bonus=row[f"{model_prefix}_bonus"],
+            cbi=row[f"{model_prefix}_defensive_contribution"],
             tackles=0.0,
             recoveries=0.0,
         )
