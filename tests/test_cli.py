@@ -1000,6 +1000,79 @@ class TestBaselineCommand:
         assert "Defensive-contribution era-continuity experiment" in report_text
 
 
+class TestGbmBaselineCommand:
+    """CLI surface for Phase B step 6: fitting/evaluating the LightGBM
+    candidate model alongside the GLM baseline and writing
+    ``docs/model-prototype-gbm.md``."""
+
+    _facts = TestBaselineCommand._facts
+
+    def test_no_matrix_available_reports_nothing_to_analyse(
+        self, isolated_data_root: Path, tmp_path: Path
+    ) -> None:
+        report_path = tmp_path / "report.md"
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "gbm-baseline",
+                "--report-path",
+                str(report_path),
+            ],
+        )
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "skipped" in result.output
+        assert not report_path.exists()
+
+    def test_train_only_reports_empty_split(self, isolated_data_root: Path, tmp_path: Path) -> None:
+        self._facts(isolated_data_root, "2016-17", 20)
+        report_path = tmp_path / "report.md"
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "gbm-baseline",
+                "--report-path",
+                str(report_path),
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS
+        assert "skipped" in result.output
+        assert not report_path.exists()
+
+    def test_fits_and_evaluates_writing_a_report(
+        self, isolated_data_root: Path, tmp_path: Path
+    ) -> None:
+        self._facts(isolated_data_root, "2016-17", 30)
+        self._facts(isolated_data_root, "2024-25", 15)
+        report_path = tmp_path / "docs" / "model-prototype-gbm.md"
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "gbm-baseline",
+                "--report-path",
+                str(report_path),
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert "validation row(s) evaluated" in result.output
+        assert report_path.is_file()
+        report_text = report_path.read_text(encoding="utf-8")
+        assert "Per-component, per-position metrics" in report_text
+        assert "System score" in report_text
+        assert "Rank correlation by gameweek" in report_text
+        assert "| glm |" in report_text
+        assert "| lgbm |" in report_text
+
+
 class TestBackfillEloCommand:
     """CLI surface for the historical Club Elo backfill (plan §0.6, Step 14).
 

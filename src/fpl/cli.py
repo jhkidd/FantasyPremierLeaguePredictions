@@ -126,6 +126,8 @@ from fpl.training.evaluation import (
     points_error_report,
     spearman_by_gameweek,
 )
+from fpl.training.gbm_baseline import fit_gbm_baseline, predict_gbm_baseline
+from fpl.training.gbm_report import render_gbm_report
 from fpl.training.splits import VALIDATION_SEASON, chronological_split
 from fpl.understat_capture import capture_league_data, capture_match_data
 
@@ -1066,7 +1068,14 @@ def _naive_metrics_table(validation: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
-def _glm_metrics_table(validation: pl.DataFrame) -> pl.DataFrame:
+def _component_metrics_table(
+    validation: pl.DataFrame, *, model_prefix: str = "glm"
+) -> pl.DataFrame:
+    """Per-(component, position) regression metrics table for any
+    two-stage model sharing the GLM baseline's ``<model_prefix>_<target>``
+    predicted-column convention (:data:`_GLM_TARGETS`) - ``model_prefix``
+    defaults to ``"glm"`` but is equally ``"lgbm"`` for
+    :mod:`fpl.training.gbm_baseline`'s predictions (Phase B step 6)."""
     rows = []
     for target in _GLM_TARGETS:
         is_count_target = target in GLM_COMPONENTS
@@ -1075,7 +1084,7 @@ def _glm_metrics_table(validation: pl.DataFrame) -> pl.DataFrame:
             metrics = component_regression_metrics(
                 subset,
                 actual_column=f"label_{target}",
-                predicted_column=f"glm_{target}",
+                predicted_column=f"{model_prefix}_{target}",
                 poisson=is_count_target,
             )
             rows.append({"component": target, "position": position, **metrics})
@@ -1132,7 +1141,7 @@ def baseline(
         validation_row_count=validation.height,
         validation_season=VALIDATION_SEASON,
         naive_metrics=_naive_metrics_table(validation_with_predictions),
-        glm_metrics=_glm_metrics_table(validation_with_predictions),
+        glm_metrics=_component_metrics_table(validation_with_predictions, model_prefix="glm"),
         points_report=points_error_report(scored),
         gameweek_spearman=spearman_by_gameweek(scored),
         era_continuity_metrics=era_continuity_metrics,
@@ -1145,6 +1154,86 @@ def baseline(
 
     typer.echo(
         f"baseline: {validation.height} validation row(s) evaluated, report written to "
+        f"{resolved_report_path}"
+    )
+
+
+_DEFAULT_GBM_REPORT_PATH = Path(__file__).resolve().parents[2] / "docs" / "model-prototype-gbm.md"
+
+
+@app.command("gbm-baseline")
+def gbm_baseline(
+    ctx: typer.Context,
+    report_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--report-path", help="Override the markdown report output path (for testing)."
+        ),
+    ] = None,
+) -> None:
+    """Fit the Phase B LightGBM candidate model
+    (:mod:`fpl.training.gbm_baseline`) alongside the existing GLM baseline
+    on the chronological training split, evaluate both **on the validation
+    split only**, and write a side-by-side markdown report to
+    ``docs/model-prototype-gbm.md`` (`.github/context/gbm-baseline-
+    phase-b.md` step 6).
+
+    Never reads the test split, for the same reason ``fpl baseline``
+    never does.
+
+    Builds/loads the training matrix the same way ``fpl dataset``/``fpl
+    baseline`` do if ``data/training/matrix.parquet`` is not already
+    present."""
+    data_root = _data_root(ctx)
+    matrix = _load_or_build_training_matrix(data_root)
+    if matrix is None:
+        typer.echo(
+            "gbm-baseline: skipped, no training matrix available yet (run `fpl dataset` first)"
+        )
+        return
+
+    train, validation, _test = chronological_split(matrix)
+    if train.height == 0 or validation.height == 0:
+        typer.echo("gbm-baseline: skipped, chronological train/validation split is empty")
+        return
+
+    glm_bundle = fit_glm_baseline(train)
+    lgbm_bundle = fit_gbm_baseline(train)
+
+    validation_with_glm = predict_glm_baseline(glm_bundle, validation)
+    validation_with_lgbm = predict_gbm_baseline(lgbm_bundle, validation_with_glm)
+    # naive_* columns are required by assemble_predicted_points for every
+    # target neither model predicts (saves/cards/penalties/own_goals) -
+    # shared unchanged between the glm- and lgbm-prefixed assemblies below.
+    validation_with_predictions = naive_rolling_mean_predictions(validation_with_lgbm)
+
+    glm_scored = assemble_predicted_points(validation_with_predictions, model_prefix="glm")
+    lgbm_scored = assemble_predicted_points(validation_with_predictions, model_prefix="lgbm")
+
+    markdown = render_gbm_report(
+        train_row_count=train.height,
+        train_seasons=sorted(train["season"].unique().to_list()),
+        validation_row_count=validation.height,
+        validation_season=VALIDATION_SEASON,
+        glm_component_metrics=_component_metrics_table(
+            validation_with_predictions, model_prefix="glm"
+        ),
+        lgbm_component_metrics=_component_metrics_table(
+            validation_with_predictions, model_prefix="lgbm"
+        ),
+        glm_points_report=points_error_report(glm_scored),
+        lgbm_points_report=points_error_report(lgbm_scored),
+        glm_gameweek_spearman=spearman_by_gameweek(glm_scored),
+        lgbm_gameweek_spearman=spearman_by_gameweek(lgbm_scored),
+        report_path=report_path or _DEFAULT_GBM_REPORT_PATH,
+    )
+
+    resolved_report_path = report_path or _DEFAULT_GBM_REPORT_PATH
+    resolved_report_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_report_path.write_text(markdown, encoding="utf-8")
+
+    typer.echo(
+        f"gbm-baseline: {validation.height} validation row(s) evaluated, report written to "
         f"{resolved_report_path}"
     )
 
