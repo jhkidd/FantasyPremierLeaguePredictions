@@ -139,6 +139,16 @@ and verify CI green (`gh run watch`) before the next step.
     (or a sibling file) with the full recommendation.
 13. Full test suite + lint clean; run once for real to produce the first real recommendation.
 
+    **Outcome (2026-09-22):** no real recommendation is produced this session. `fpl optimise`
+    needs a non-null predictions archive, and Phase C step 8 already found that `fpl predict`
+    cannot currently produce one — the live 2026-27 season has no staged per-player match stats
+    (same live-ingestion gap), so every predicted-points column comes back null and `pick_squad`
+    would have nothing to rank. Rather than repeat that investigation, this is recorded up front:
+    `fpl optimise`'s own test suite (`tests/test_cli.py::TestOptimiseCommand`) proves the command
+    works correctly against a valid predictions frame; a real end-to-end run is blocked on the
+    same subsystem-2 follow-up (staging FPL's `event/{event}/live/` endpoint) already logged in
+    `model-prototype-phase-9.md` §3.5 and step 8 above.
+
 ### Phase E — MVP static Pages site (subsystem 5, first slice)
 
 14. `site/index.html` + `site/style.css` + `site/app.js`: fetches the committed recommendation

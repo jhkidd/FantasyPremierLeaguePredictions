@@ -10,6 +10,7 @@ so the intended surface is visible and honestly unfinished rather than absent.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -64,6 +65,8 @@ from fpl.identity.team_external_ids import (
 from fpl.identity.teams import build_teams_crosswalk, write_teams_crosswalk
 from fpl.inference.predict import predict_next_gameweek
 from fpl.ingest import ingest_fpl
+from fpl.optimiser.rules import BUDGET_MILLIONS
+from fpl.optimiser.squad import SquadPlayer, pick_squad, pick_starting_xi
 from fpl.ownership import (
     COHORTS,
     ELITE_COHORT,
@@ -1410,6 +1413,91 @@ def predict(
     write_parquet(predictions, out_dir / "part.parquet")
 
     typer.echo(f"predict: {predictions.height} row(s) written to {out_dir / 'part.parquet'}")
+
+
+def _player_payload(player: SquadPlayer) -> dict:
+    return {
+        "player_id": player.player_id,
+        "team_id": player.team_id,
+        "position": player.position,
+        "price": player.price,
+        "predicted_points": player.predicted_points,
+    }
+
+
+@app.command()
+def optimise(
+    ctx: typer.Context,
+    season: SeasonOption = str(CURRENT_SEASON),
+    as_of: Annotated[
+        str,
+        typer.Option(
+            "--as-of",
+            help="ISO 8601 instant matching an already-archived partition. Defaults to the latest.",
+        ),
+    ] = "",
+    budget: Annotated[
+        float, typer.Option("--budget", help="Total squad budget, in millions.")
+    ] = BUDGET_MILLIONS,
+) -> None:
+    """Pick a squad/starting-XI recommendation from the latest (or a named)
+    predictions archive partition and write it alongside as ``squad.json``
+    (Phase D step 12, `.github/context/subsystem3-close-and-mvp-site.md`)."""
+    parsed_season = _parse_season(season)
+    data_root = _data_root(ctx)
+
+    if as_of:
+        moment = _parse_as_of(as_of)
+        partition = paths.predictions_partition(parsed_season, moment, data_root=data_root)
+        if not partition.is_dir():
+            typer.secho(
+                f"optimise: no predictions archived at {partition}", err=True, fg=typer.colors.RED
+            )
+            raise typer.Exit(exit_codes.FAILURE)
+    else:
+        partition = paths.latest_predictions_partition(parsed_season, data_root=data_root)
+        if partition is None:
+            typer.secho(
+                f"optimise: no predictions archive found for season {parsed_season} "
+                "(run `fpl predict` first)",
+                err=True,
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(exit_codes.FAILURE)
+        moment = paths.decode_as_of(partition.name.removeprefix("as_of="))
+
+    predictions = read_parquet(partition / "part.parquet")
+    # `price` is the raw FPL `now_cost`, in tenths of a million (e.g. 75 ==
+    # £7.5m) - the optimiser works in millions throughout.
+    predictions = predictions.with_columns((pl.col("price") / 10.0).alias("price"))
+
+    try:
+        squad = pick_squad(predictions, budget=budget)
+        xi = pick_starting_xi(squad)
+    except ValueError as exc:
+        typer.secho(f"optimise: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(exit_codes.FAILURE) from exc
+
+    payload = {
+        "season": str(parsed_season),
+        "as_of": moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "budget": budget,
+        "total_price": squad.total_price,
+        "total_predicted_points": squad.total_predicted_points,
+        "squad": [_player_payload(player) for player in squad.players],
+        "starting_xi": [_player_payload(player) for player in xi.starting_xi],
+        "bench": [_player_payload(player) for player in xi.bench],
+        "captain": _player_payload(xi.captain),
+        "vice_captain": _player_payload(xi.vice_captain),
+    }
+    out_path = partition / "squad.json"
+    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    typer.echo(
+        f"optimise: squad written to {out_path} "
+        f"(total {squad.total_predicted_points:.1f} predicted pts, "
+        f"£{squad.total_price:.1f}m)"
+    )
 
 
 def _rules_for_season(season: Season) -> str:

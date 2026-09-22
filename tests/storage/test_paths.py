@@ -252,3 +252,30 @@ class TestPredictionsPartition:
         explicit = tmp_path / "explicit-data"
         result = paths.predictions_partition(SEASON, MOMENT, data_root=explicit)
         assert result.is_relative_to(explicit)
+
+
+class TestLatestPredictionsPartition:
+    def test_returns_none_when_nothing_archived(self) -> None:
+        assert paths.latest_predictions_partition(SEASON) is None
+
+    def test_returns_the_only_partition(self) -> None:
+        expected = paths.predictions_partition(SEASON, MOMENT)
+        expected.mkdir(parents=True)
+        assert paths.latest_predictions_partition(SEASON) == expected
+
+    def test_returns_the_most_recent_of_many(self) -> None:
+        for offset in (0, 1, 5, 2):
+            paths.predictions_partition(SEASON, MOMENT + timedelta(days=offset)).mkdir(parents=True)
+        latest = paths.latest_predictions_partition(SEASON)
+        assert latest is not None
+        assert latest.name == f"as_of={paths.encode_as_of(MOMENT + timedelta(days=5))}"
+
+    def test_ignores_unrelated_directories(self, isolated_data_root: Path) -> None:
+        parent = isolated_data_root / "predictions" / f"season={SEASON}"
+        (parent / "notes").mkdir(parents=True)
+        assert paths.latest_predictions_partition(SEASON) is None
+
+    def test_is_scoped_to_its_season(self) -> None:
+        other_season = Season(2025)
+        paths.predictions_partition(SEASON, MOMENT).mkdir(parents=True)
+        assert paths.latest_predictions_partition(other_season) is None

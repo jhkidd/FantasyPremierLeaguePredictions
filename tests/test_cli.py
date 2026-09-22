@@ -1325,6 +1325,175 @@ class TestPredictCommand:
         assert (out_path / "part.parquet").exists()
 
 
+class TestOptimiseCommand:
+    """CLI surface for Phase D step 12: reading the latest predictions
+    archive and writing a squad recommendation
+    (`.github/context/subsystem3-close-and-mvp-site.md`)."""
+
+    def _write_predictions(
+        self, data_root: Path, season: Season, as_of: datetime, rows: list[dict]
+    ) -> Path:
+        import polars as pl
+
+        from fpl.storage import paths
+        from fpl.storage.parquet_io import write_parquet
+
+        out_dir = paths.predictions_partition(season, as_of, data_root=data_root)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_parquet(pl.DataFrame(rows), out_dir / "part.parquet")
+        return out_dir
+
+    def _valid_squad_rows(self) -> list[dict]:
+        """15 candidates - exactly enough to fill every quota - each on its
+        own club, cheap enough to fit the default £100m budget once
+        ``price`` (raw ``now_cost`` tenths-of-a-million) is converted."""
+        rows = []
+        team = 1
+        for position, count in (("GK", 2), ("DEF", 5), ("MID", 5), ("FWD", 3)):
+            for i in range(count):
+                rows.append(
+                    {
+                        "player_id": team,
+                        "fixture_id": team,
+                        "team_id": team,
+                        "position": position,
+                        "price": 40,  # now_cost 40 -> £4.0m
+                        "predicted_total_points_fpl": float(10 + i),
+                    }
+                )
+                team += 1
+        return rows
+
+    def test_no_predictions_archive_fails_cleanly(self, isolated_data_root: Path) -> None:
+        result = runner.invoke(
+            app,
+            ["--data-root", str(isolated_data_root), "optimise", "--season", "2025-26"],
+        )
+
+        assert result.exit_code == exit_codes.FAILURE
+        assert "no predictions archive" in result.output
+        assert "fpl predict" in result.output
+
+    def test_explicit_as_of_reads_that_partition(self, isolated_data_root: Path) -> None:
+        season = Season(2025)
+        moment = datetime(2025, 8, 20, tzinfo=UTC)
+        partition = self._write_predictions(
+            isolated_data_root, season, moment, self._valid_squad_rows()
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "optimise",
+                "--season",
+                "2025-26",
+                "--as-of",
+                "2025-08-20T00:00:00Z",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert (partition / "squad.json").exists()
+
+    def test_missing_explicit_partition_fails_cleanly(self, isolated_data_root: Path) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "optimise",
+                "--season",
+                "2025-26",
+                "--as-of",
+                "2025-08-20T00:00:00Z",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.FAILURE
+        assert "no predictions archived" in result.output
+
+    def test_defaults_to_the_latest_partition(self, isolated_data_root: Path) -> None:
+        season = Season(2025)
+        older = datetime(2025, 8, 13, tzinfo=UTC)
+        newer = datetime(2025, 8, 20, tzinfo=UTC)
+        self._write_predictions(isolated_data_root, season, older, self._valid_squad_rows())
+        newest_partition = self._write_predictions(
+            isolated_data_root, season, newer, self._valid_squad_rows()
+        )
+
+        result = runner.invoke(
+            app,
+            ["--data-root", str(isolated_data_root), "optimise", "--season", "2025-26"],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        assert (newest_partition / "squad.json").exists()
+
+    def test_writes_the_expected_recommendation_shape(self, isolated_data_root: Path) -> None:
+        season = Season(2025)
+        moment = datetime(2025, 8, 20, tzinfo=UTC)
+        partition = self._write_predictions(
+            isolated_data_root, season, moment, self._valid_squad_rows()
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "optimise",
+                "--season",
+                "2025-26",
+                "--as-of",
+                "2025-08-20T00:00:00Z",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        payload = json.loads((partition / "squad.json").read_text(encoding="utf-8"))
+        assert payload["season"] == "2025-26"
+        assert payload["as_of"] == "2025-08-20T00:00:00Z"
+        assert len(payload["squad"]) == 15
+        assert len(payload["starting_xi"]) == 11
+        assert len(payload["bench"]) == 4
+        assert payload["squad"][0]["price"] == 4.0
+        assert payload["total_price"] == pytest.approx(15 * 4.0)
+        assert "captain" in payload and "vice_captain" in payload
+
+    def test_infeasible_squad_fails_cleanly(self, isolated_data_root: Path) -> None:
+        season = Season(2025)
+        moment = datetime(2025, 8, 20, tzinfo=UTC)
+        rows = [
+            {
+                "player_id": 1,
+                "fixture_id": 1,
+                "team_id": 1,
+                "position": "GK",
+                "price": 40,
+                "predicted_total_points_fpl": 5.0,
+            }
+        ]
+        self._write_predictions(isolated_data_root, season, moment, rows)
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "optimise",
+                "--season",
+                "2025-26",
+                "--as-of",
+                "2025-08-20T00:00:00Z",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.FAILURE
+        assert "cannot complete squad" in result.output
+
+
 class TestBackfillEloCommand:
     """CLI surface for the historical Club Elo backfill (plan §0.6, Step 14).
 

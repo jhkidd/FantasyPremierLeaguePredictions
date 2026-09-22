@@ -27,6 +27,7 @@ __all__ = [
     "iter_as_of_partitions",
     "iter_chunks",
     "latest_partition",
+    "latest_predictions_partition",
     "model_artefact_dir",
     "models_active_pointer",
     "predictions_partition",
@@ -311,3 +312,17 @@ def predictions_partition(
     (spec §9) — append-only, version-stamped by the producing model, and the
     same artefact the Pages app reads."""
     return _root(data_root) / "predictions" / f"season={season}" / f"as_of={encode_as_of(as_of)}"
+
+
+def latest_predictions_partition(season: Season, *, data_root: Path | None = None) -> Path | None:
+    """The most recent predictions archive for a season, or None if there is
+    none — the partition the optimiser (and, eventually, the Pages site)
+    reads (Phase D step 12, `.github/context/subsystem3-close-and-mvp-site.md`).
+
+    Found by listing sibling directories, mirroring :func:`latest_partition`,
+    so the predictions tree stays purely append-only."""
+    parent = _root(data_root) / "predictions" / f"season={season}"
+    if not parent.is_dir():
+        return None
+    partitions = [p for p in parent.iterdir() if p.is_dir() and p.name.startswith("as_of=")]
+    return max(partitions, key=lambda p: p.name) if partitions else None
