@@ -14,7 +14,7 @@ dependencies = [
     "matplotlib>=3.11.1",
     "scipy>=1.18.0",
     "lightgbm>=4.5",
-    "joblib>=1.5.3",
+    "joblib>=1.6.0",
 ]
 
 [project.scripts]
