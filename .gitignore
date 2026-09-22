@@ -23,3 +23,6 @@ scratch/
 # `fpl dataset`, so it is the one derived artefact excepted from the
 # data/-is-the-committed-record rule above).
 data/training/
+
+commit_msg.txt
+
