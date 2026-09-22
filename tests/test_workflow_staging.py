@@ -35,6 +35,22 @@ def _text() -> str:
     return DAILY_SNAPSHOT.read_text(encoding="utf-8")
 
 
+def _step_block(name: str) -> str:
+    """The text of one step, from its ``- name: <name>`` line up to (but not
+    including) the next step's ``- name:`` line.
+
+    Matches on a trailing newline so ``name="Stage"`` finds the core
+    ``- name: Stage`` step without also matching ``- name: Stage
+    openfootball`` or any other step whose name merely starts with it.
+    """
+    text = _text()
+    marker = f"      - name: {name}\n"
+    start = text.index(marker)
+    rest = text[start:]
+    next_step = rest.find("\n      - name:", len(marker))
+    return rest if next_step == -1 else rest[:next_step]
+
+
 class TestDailySnapshotStages:
     """Ingesting without staging is the bug; these pin the fix."""
 
@@ -77,5 +93,22 @@ class TestStagingFailureIsVisible:
     """Recoverable, but not to be shrugged off."""
 
     def test_staging_step_is_not_permitted_to_fail_silently(self) -> None:
-        """No `continue-on-error` on the staging step: a red run is the signal."""
-        assert "continue-on-error" not in _text()
+        """No `continue-on-error` on the core staging step: a red run there is
+        the signal.
+
+        Scoped to just the `Stage` step rather than the whole file: Phase 7
+        (plan §7) deliberately added `continue-on-error: true` to the Tier 2
+        ingest/stage steps (openfootball, football-data.co.uk, Understat) so
+        one flaky source can't block the others, surfacing failure via a
+        GitHub issue instead (see the "Raise an issue" step). That is an
+        intentional, different failure-handling choice for those steps, not
+        a silent-failure regression of this one.
+        """
+        assert "continue-on-error" not in _step_block("Stage")
+
+    def test_tier2_steps_are_still_allowed_to_continue_on_error(self) -> None:
+        """The opposite regression: this fix must not accidentally strip
+        Tier 2's own `continue-on-error`, which is what lets one flaky
+        source fail without blocking the others (plan §7)."""
+        for name in ("Ingest openfootball", "Stage openfootball", "Stage Understat"):
+            assert "continue-on-error: true" in _step_block(name)
