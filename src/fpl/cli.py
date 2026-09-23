@@ -1408,6 +1408,19 @@ def predict(
         typer.secho("predict: skipped, nothing to predict in the requested horizon", err=True)
         raise typer.Exit(exit_codes.FAILURE)
 
+    # A row can exist without a usable prediction: every `predicted_total_points_fpl`
+    # comes back null when the live season has no staged per-player match stats yet
+    # (the live-ingestion gap tracked in `.github/context/subsystem3-close-and-mvp-site.md`
+    # steps 8/13). Archiving that would commit a partition the optimiser can never
+    # rank anything from, so it is treated the same as "nothing to predict".
+    if predictions["predicted_total_points_fpl"].null_count() == predictions.height:
+        typer.secho(
+            "predict: skipped, every predicted_total_points_fpl came back null "
+            "(likely missing live per-player stats for the current season)",
+            err=True,
+        )
+        raise typer.Exit(exit_codes.FAILURE)
+
     out_dir = paths.predictions_partition(parsed_season, moment, data_root=data_root)
     out_dir.mkdir(parents=True, exist_ok=True)
     write_parquet(predictions, out_dir / "part.parquet")

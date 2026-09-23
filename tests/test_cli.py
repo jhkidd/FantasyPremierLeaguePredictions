@@ -1237,6 +1237,70 @@ class TestPredictCommand:
         out_dir.mkdir(parents=True, exist_ok=True)
         write_parquet(pl.DataFrame(rows), out_dir / "part.parquet")
 
+    def _write_facts(self, data_root: Path, season: Season, rows: list[dict]) -> None:
+        """A minimal ``facts/player_fixture`` row - mirrors
+        ``tests/inference/test_predict.py``'s helper of the same name.
+        Without at least one row of history before ``as_of``, every
+        ``naive_*`` component (and so ``predicted_total_points_fpl``
+        itself) comes back null (spec: ``assemble_predicted_points``)."""
+        import polars as pl
+
+        from fpl.storage import paths
+        from fpl.storage.parquet_io import write_parquet
+
+        defaults = {
+            "season": str(season),
+            "player_code": None,
+            "opponent_team_id": 0,
+            "was_home": True,
+            "position": "MID",
+            "minutes": 0,
+            "starts": 0,
+            "goals_scored": 0,
+            "assists": 0,
+            "goals_conceded": 0,
+            "own_goals": 0,
+            "penalties_saved": 0,
+            "penalties_missed": 0,
+            "yellow_cards": 0,
+            "red_cards": 0,
+            "saves": 0,
+            "cbi": 0,
+            "tackles": 0,
+            "recoveries": 0,
+            "defensive_contribution": 0,
+            "attempted_passes": 0,
+            "completed_passes": 0,
+            "key_passes": 0,
+            "big_chances_created": 0,
+            "big_chances_missed": 0,
+            "open_play_crosses": 0,
+            "dribbles": 0,
+            "tackled": 0,
+            "fouls": 0,
+            "offside": 0,
+            "target_missed": 0,
+            "errors_leading_to_goal": 0,
+            "errors_leading_to_goal_attempt": 0,
+            "penalties_conceded": 0,
+            "winning_goals": 0,
+            "expected_goals": 0,
+            "expected_assists": 0,
+            "expected_goal_involvements": 0,
+            "expected_goals_conceded": 0,
+            "total_points_fpl": 0,
+            "bonus_fpl": 0,
+            "bps_fpl": 0,
+            "obs_defensive": True,
+            "obs_bps_inputs": True,
+            "obs_expected": True,
+            "obs_starts": True,
+        }
+        full_rows = [{**defaults, **row} for row in rows]
+        out_dir = paths.facts_table("player_fixture", season, data_root=data_root)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_parquet(pl.DataFrame(full_rows), out_dir / "part.parquet")
+
     def test_no_active_model_fails_cleanly(
         self, isolated_data_root: Path, isolated_models_root: Path
     ) -> None:
@@ -1277,6 +1341,52 @@ class TestPredictCommand:
         assert result.exit_code == exit_codes.FAILURE
         assert "predict: skipped" in result.output
 
+    def test_all_null_predictions_skips_with_failure_exit(
+        self,
+        isolated_data_root: Path,
+        isolated_models_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A row can exist with nothing usable in it - the live-ingestion
+        gap (`.github/context/subsystem3-close-and-mvp-site.md` steps
+        8/13) leaves every `predicted_total_points_fpl` null rather than
+        the frame empty. That must not archive a partition the optimiser
+        can never rank anything from."""
+        import polars as pl
+
+        def _fake_predict(*args: object, **kwargs: object) -> pl.DataFrame:
+            return pl.DataFrame(
+                {
+                    "player_id": [1, 2],
+                    "fixture_id": [10, 11],
+                    "predicted_total_points_fpl": [None, None],
+                },
+                schema={
+                    "player_id": pl.Int64,
+                    "fixture_id": pl.Int64,
+                    "predicted_total_points_fpl": pl.Float64,
+                },
+            )
+
+        monkeypatch.setattr("fpl.cli.predict_next_gameweek", _fake_predict)
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "predict",
+                "--season",
+                "2025-26",
+                "--as-of",
+                "2025-08-20T00:00:00Z",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.FAILURE
+        assert "predict: skipped" in result.output
+        assert not any(isolated_data_root.rglob("part.parquet"))
+
     def test_predicts_and_archives_to_the_predictions_partition(
         self, isolated_data_root: Path, isolated_models_root: Path
     ) -> None:
@@ -1300,6 +1410,23 @@ class TestPredictCommand:
                     "team_h": 3,
                     "team_a": 7,
                     "finished": False,
+                }
+            ],
+        )
+        # History before as_of, so every naive-only component has a real
+        # value rather than assemble_predicted_points nulling the row out.
+        self._write_facts(
+            isolated_data_root,
+            season,
+            [
+                {
+                    "fixture_id": 400,
+                    "player_id": 1,
+                    "team_id": 3,
+                    "event": 1,
+                    "kickoff_time": datetime(2025, 8, 16, 14, tzinfo=UTC),
+                    "minutes": 90,
+                    "goals_scored": 1,
                 }
             ],
         )
