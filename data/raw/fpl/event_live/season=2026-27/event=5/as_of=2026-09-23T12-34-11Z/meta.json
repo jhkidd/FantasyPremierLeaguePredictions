@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 15879,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "event_live",
+  "event": 5,
+  "fetched_at": "2026-09-23T12:34:11.451083+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 474264,
+  "season": "2026-27",
+  "sha256": "aeee6dd5b56567b04ef9b4e5b9828ee4d81e094803dc0e6553cd3b394178c6dd",
+  "source": "fpl",
+  "url": "https://fantasy.premierleague.com/api/event/5/live/"
+}
