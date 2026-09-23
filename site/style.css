@@ -1,0 +1,150 @@
+:root {
+  color-scheme: light;
+  --pitch-green: #00485a;
+  --accent: #37003c;
+  --card-bg: #ffffff;
+  --border: #d9d9e0;
+  --muted: #6b6b76;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: #f4f4f8;
+  color: #1a1a1f;
+}
+
+header {
+  background: var(--accent);
+  color: #fff;
+  padding: 1.5rem 1rem;
+  text-align: center;
+}
+
+header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.4rem;
+}
+
+.meta {
+  margin: 0;
+  opacity: 0.85;
+  font-size: 0.9rem;
+}
+
+main {
+  max-width: 900px;
+  margin: 1.5rem auto;
+  padding: 0 1rem;
+}
+
+#status {
+  text-align: center;
+  color: var(--muted);
+}
+
+.summary {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.summary .stat {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  text-align: center;
+  min-width: 8rem;
+}
+
+.summary .stat .value {
+  display: block;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.summary .stat .label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+section {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+section h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+  color: var(--pitch-green);
+}
+
+.position-group {
+  margin-bottom: 0.75rem;
+}
+
+.position-group h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+ul.player-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.player-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.player-row .badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--pitch-green);
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.35rem;
+  margin-left: 0.4rem;
+}
+
+.player-row .points {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 1.5rem 1rem;
+}
+
+footer a {
+  color: var(--pitch-green);
+}

@@ -11,6 +11,9 @@ commits the results, which the site reads.
 
 Subsystem 1 (ingestion and feature store) is in development.
 
+**Live site:** https://jhkidd.github.io/FantasyPremierLeaguePredictions/ — renders the most
+recent squad recommendation once one has been published (`.github/context/subsystem3-close-and-mvp-site.md`).
+
 | Doc | Purpose |
 |---|---|
 | [Design spec](docs/superpowers/specs/2026-07-30-fpl-data-layer-design.md) | Architecture, data sources, contracts |
