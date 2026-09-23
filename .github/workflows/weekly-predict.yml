@@ -57,7 +57,12 @@ jobs:
       - name: Commit predictions and recommendation
         run: |
           set -euo pipefail
-          git add data/predictions/
+          # data/predictions/ won't exist at all until the first partition is
+          # ever written (git doesn't track empty directories), so `git add`
+          # on a bare path here would otherwise fail the whole step.
+          if [ -d data/predictions ]; then
+            git add data/predictions/
+          fi
           if git diff --cached --quiet; then
             echo "Nothing new to commit."
             exit 0
