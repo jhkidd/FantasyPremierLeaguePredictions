@@ -1462,6 +1462,35 @@ class TestOptimiseCommand:
         assert payload["total_price"] == pytest.approx(15 * 4.0)
         assert "captain" in payload and "vice_captain" in payload
 
+    def test_writes_a_latest_pointer_the_site_can_fetch(self, isolated_data_root: Path) -> None:
+        from fpl.storage import paths
+
+        season = Season(2025)
+        moment = datetime(2025, 8, 20, tzinfo=UTC)
+        self._write_predictions(isolated_data_root, season, moment, self._valid_squad_rows())
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "optimise",
+                "--season",
+                "2025-26",
+                "--as-of",
+                "2025-08-20T00:00:00Z",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        pointer_path = paths.latest_predictions_pointer(data_root=isolated_data_root)
+        pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+        assert pointer["season"] == "2025-26"
+        assert pointer["as_of"] == "2025-08-20T00:00:00Z"
+        squad_path = isolated_data_root / pointer["path"]
+        assert squad_path.exists()
+        assert json.loads(squad_path.read_text(encoding="utf-8"))["season"] == "2025-26"
+
     def test_infeasible_squad_fails_cleanly(self, isolated_data_root: Path) -> None:
         season = Season(2025)
         moment = datetime(2025, 8, 20, tzinfo=UTC)

@@ -28,6 +28,7 @@ __all__ = [
     "iter_chunks",
     "latest_partition",
     "latest_predictions_partition",
+    "latest_predictions_pointer",
     "model_artefact_dir",
     "models_active_pointer",
     "predictions_partition",
@@ -326,3 +327,13 @@ def latest_predictions_partition(season: Season, *, data_root: Path | None = Non
         return None
     partitions = [p for p in parent.iterdir() if p.is_dir() and p.name.startswith("as_of=")]
     return max(partitions, key=lambda p: p.name) if partitions else None
+
+
+def latest_predictions_pointer(*, data_root: Path | None = None) -> Path:
+    """``data/predictions/latest.json`` — a small pointer recording
+    ``season``, ``as_of`` and the ``squad.json`` path (relative to the data
+    root), mirroring :func:`models_active_pointer`'s pattern. A static site
+    has no directory listing to discover the newest partition itself, so
+    this is the one fixed URL it always fetches first (Phase E step 14,
+    `.github/context/subsystem3-close-and-mvp-site.md`)."""
+    return _root(data_root) / "predictions" / "latest.json"

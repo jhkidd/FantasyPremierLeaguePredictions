@@ -279,3 +279,15 @@ class TestLatestPredictionsPartition:
         other_season = Season(2025)
         paths.predictions_partition(SEASON, MOMENT).mkdir(parents=True)
         assert paths.latest_predictions_partition(other_season) is None
+
+
+class TestLatestPredictionsPointer:
+    def test_expected_layout(self, isolated_data_root: Path) -> None:
+        assert paths.latest_predictions_pointer() == (
+            isolated_data_root / "predictions" / "latest.json"
+        )
+
+    def test_data_root_override_wins_over_environment(self, tmp_path: Path) -> None:
+        explicit = tmp_path / "explicit-data"
+        result = paths.latest_predictions_pointer(data_root=explicit)
+        assert result.is_relative_to(explicit)

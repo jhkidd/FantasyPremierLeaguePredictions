@@ -1493,6 +1493,20 @@ def optimise(
     out_path = partition / "squad.json"
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
+    pointer_path = paths.latest_predictions_pointer(data_root=data_root)
+    pointer_path.parent.mkdir(parents=True, exist_ok=True)
+    pointer_path.write_text(
+        json.dumps(
+            {
+                "season": str(parsed_season),
+                "as_of": payload["as_of"],
+                "path": str(out_path.relative_to(pointer_path.parent.parent).as_posix()),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
     typer.echo(
         f"optimise: squad written to {out_path} "
         f"(total {squad.total_predicted_points:.1f} predicted pts, "
