@@ -205,8 +205,27 @@ and verify CI green (`gh run watch`) before the next step.
     works unmodified. `site/app.js`'s `playerLabel()` now renders `"Salah (LIV)"` instead of the
     id pair.
 
+19. Follow-up (2026-09-23): a user noted the published recommendation left ~£28.7m of the £100m
+    budget unspent (£71.3m squad value, 45.9 predicted pts), which is never correct given there is
+    no reward for unspent budget — a symptom of `pick_squad`'s greedy heuristic (best
+    points-per-price first, subject to affordability), which this task's Q&A above explicitly
+    flagged as "not claimed optimal" and deferred to "a proper subsystem 4 task". That task starts
+    now: `pick_squad` was rewritten from the greedy fill to an *exact* 0/1 knapsack-style MILP
+    (`scipy.optimize.milp`, HiGHS backend, already a transitive dependency via `scipy>=1.18` — no
+    new dependency needed) that maximises total predicted points subject to budget, the four
+    position quotas (as equality constraints) and the per-club cap, in one solve. A pre-flight
+    per-position candidate count check still raises a specific `ValueError` (e.g. naming "GK")
+    when a position can't be filled at all, rather than surfacing scipy's generic infeasible
+    status. `pick_starting_xi` is unchanged (already exact). One existing test
+    (`test_double_gameweek_points_are_summed_before_ranking`) encoded the old greedy's "squeeze
+    out the pricier player" behaviour as correct; it was rewritten to assert the true optimum
+    (both players kept, +18 total FWD points instead of +11), and a new
+    `test_spends_the_full_budget_when_it_raises_total_points` test was added. Verified against
+    real staged 2026-27 data: the same partition that used to yield £71.3m/45.9 pts now yields
+    £98.9m/48.9 pts.
+
 ### Explicitly out of scope for this task (carried forward)
 
-Tuning (§3.3), the full walk-forward backtest harness (§3.4), transfers/chip-timing strategy, a
-real MILP solver, multi-gameweek horizon planning, personal-squad import, and post-prediction
-double/blank-gameweek aggregation (§3.7).
+Tuning (§3.3), the full walk-forward backtest harness (§3.4), transfers/chip-timing strategy,
+multi-gameweek horizon planning, personal-squad import, and post-prediction double/blank-gameweek
+aggregation (§3.7).

@@ -98,10 +98,13 @@ class TestPickSquad:
         assert any(p.player_id == 5 for p in squad.players)
 
     def test_double_gameweek_points_are_summed_before_ranking(self) -> None:
-        # Player 1's two fixtures sum to a higher total (8.0) than player
-        # 2's single, pricier fixture (7.0 at a worse points-per-price
-        # ratio), so player 1 must be preferred and player 2 squeezed out
-        # by the two cheaper, better-value fillers.
+        # Player 1's two fixtures must be summed (4.0 + 4.0 = 8.0), not
+        # treated as two separate single-fixture rows, before the
+        # optimiser ranks candidates. With ample budget, the exact
+        # optimiser correctly affords both player 1 (8.0, cheap) *and*
+        # player 2 (7.0, pricier) - the best possible FWD trio is those
+        # two plus one cheap filler (8 + 7 + 3 = 18), so nobody worth
+        # having is squeezed out just to save money that isn't needed.
         rows = [
             _row(1, 1, "FWD", 5.0, 4.0, fixture_id=1),
             _row(1, 1, "FWD", 5.0, 4.0, fixture_id=2),
@@ -118,7 +121,28 @@ class TestPickSquad:
 
         picked = {p.player_id: p.predicted_points for p in squad.players if p.position == "FWD"}
         assert picked[1] == 8.0
-        assert 1 in picked and 2 not in picked
+        assert 2 in picked
+        assert sum(picked.values()) == 18.0
+
+    def test_spends_the_full_budget_when_it_raises_total_points(self) -> None:
+        # A single premium FWD (12.0m, 20.0 predicted points - by far the
+        # best points-per-price *and* best raw total) must be picked over
+        # cheaper alternatives even though it leaves less budget spare,
+        # because there is no reward for unspent budget and every other
+        # slot can still be filled from the cheap pool.
+        rows = [
+            _row(9, 9, "FWD", 12.0, 20.0),
+            *_cheap_pool("FWD", 30, 2),
+            *_cheap_pool("GK", 1, 2),
+            *_cheap_pool("DEF", 10, 5),
+            *_cheap_pool("MID", 20, 5),
+        ]
+        predictions = pl.DataFrame(rows)
+
+        squad = pick_squad(predictions, budget=100.0)
+
+        assert 9 in {p.player_id for p in squad.players}
+        assert squad.total_predicted_points == pytest.approx(20.0 + 1.0 * 14)
 
     def test_drops_rows_with_null_predicted_points(self) -> None:
         rows = [

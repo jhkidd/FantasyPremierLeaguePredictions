@@ -1,20 +1,26 @@
-"""``fpl.optimiser.squad`` — the MVP heuristic squad and starting-XI picker
+"""``fpl.optimiser.squad`` — the squad and starting-XI picker
 (Phase D, `.github/context/subsystem3-close-and-mvp-site.md`).
 
-:func:`pick_squad` is a greedy heuristic (best predicted-points-per-price
-first, subject to budget/formation/club-limit constraints), explicitly
-not a global optimum - a real MILP solver is deferred to a later task.
-:func:`pick_starting_xi` *is* exact: with the squad size fixed at 15, the
-best-of-13-choose-10 outfield formation is small enough to search
+:func:`pick_squad` is an *exact* 0/1 knapsack-style MILP (via
+``scipy.optimize.milp``, HiGHS backend): it maximises total predicted
+points subject to the budget, per-position quotas and per-club cap,
+rather than approximating with a greedy heuristic - so it will spend the
+full budget whenever doing so raises the total, instead of stopping at
+the first affordable "good enough" pick per slot.
+:func:`pick_starting_xi` is also exact: with the squad size fixed at 15,
+the best-of-13-choose-10 outfield formation is small enough to search
 exhaustively rather than approximate.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from itertools import combinations
 
+import numpy as np
 import polars as pl
+from scipy.optimize import Bounds, LinearConstraint, milp
 
 from fpl.optimiser.rules import (
     BUDGET_MILLIONS,
@@ -72,10 +78,6 @@ class StartingXISelection:
     vice_captain: SquadPlayer
 
 
-def _value_ratio(player: SquadPlayer) -> float:
-    return player.predicted_points / player.price if player.price > 0 else player.predicted_points
-
-
 def _candidates(predictions: pl.DataFrame) -> list[SquadPlayer]:
     missing = _REQUIRED_COLUMNS - set(predictions.columns)
     if missing:
@@ -103,80 +105,61 @@ def _candidates(predictions: pl.DataFrame) -> list[SquadPlayer]:
     ]
 
 
-def _min_remaining_cost(
-    pool_by_position: dict[Position, list[SquadPlayer]],
-    remaining_quota: dict[Position, int],
-    excluded_ids: set[int],
-) -> float:
-    """A per-position, club-unaware lower bound on the cost to fill every
-    still-open slot - deliberately ignores the club cap (a heuristic
-    simplification, not an exact feasibility proof, per this module's
-    docstring)."""
-    total = 0.0
-    for position, quota in remaining_quota.items():
-        if quota == 0:
-            continue
-        eligible_prices = sorted(
-            candidate.price
-            for candidate in pool_by_position[position]
-            if candidate.player_id not in excluded_ids
-        )
-        if len(eligible_prices) < quota:
-            return float("inf")
-        total += sum(eligible_prices[:quota])
-    return total
+def _solve_milp(candidates: list[SquadPlayer], budget: float) -> list[SquadPlayer] | None:
+    """Exact 0/1 selection maximising total predicted points subject to
+    budget, per-position quotas and the per-club cap. Returns ``None`` if
+    the constraints admit no feasible squad (scipy's ``milp`` reports
+    non-success), rather than raising - the caller decides how to report
+    that."""
+    points = np.array([candidate.predicted_points for candidate in candidates])
+    prices = np.array([candidate.price for candidate in candidates])
+
+    constraints = [LinearConstraint(prices, -np.inf, budget)]
+    for position, quota in SQUAD_POSITION_QUOTAS.items():
+        row = np.array([1.0 if c.position == position else 0.0 for c in candidates])
+        constraints.append(LinearConstraint(row, quota, quota))
+    for club in sorted({c.team_id for c in candidates}):
+        row = np.array([1.0 if c.team_id == club else 0.0 for c in candidates])
+        constraints.append(LinearConstraint(row, -np.inf, MAX_PLAYERS_PER_CLUB))
+
+    result = milp(
+        c=-points,
+        constraints=constraints,
+        integrality=np.ones(len(candidates)),
+        bounds=Bounds(0, 1),
+    )
+    if not result.success:
+        return None
+    return [
+        candidate for candidate, chosen in zip(candidates, result.x > 0.5, strict=True) if chosen
+    ]
 
 
 def pick_squad(predictions: pl.DataFrame, *, budget: float = BUDGET_MILLIONS) -> SquadSelection:
-    """Greedy squad construction: fill each position's quota with the best
-    predicted-points-per-price candidate that keeps the remaining budget
-    sufficient to complete every other still-open slot, and that does not
-    breach the per-club cap."""
+    """Exact squad selection: the combination of candidates that maximises
+    total predicted points subject to the budget, each position's quota,
+    and the per-club cap (a 0/1 knapsack-style MILP, see module
+    docstring)."""
     candidates = _candidates(predictions)
 
-    pool_by_position: dict[Position, list[SquadPlayer]] = {
-        position: [] for position in SQUAD_POSITION_QUOTAS
-    }
-    for candidate in candidates:
-        if candidate.position in pool_by_position:
-            pool_by_position[candidate.position].append(candidate)
-    for pool in pool_by_position.values():
-        pool.sort(key=lambda c: (-_value_ratio(c), -c.predicted_points, c.player_id))
-
-    picked: list[SquadPlayer] = []
-    picked_ids: set[int] = set()
-    club_counts: dict[int, int] = {}
-    remaining_budget = budget
-    remaining_quota = dict(SQUAD_POSITION_QUOTAS)
-
+    # Pre-flight per-position feasibility check, so a shortage is reported
+    # against the specific position responsible rather than as scipy's
+    # generic "infeasible" MILP status.
+    counts = Counter(candidate.position for candidate in candidates)
     for position, quota in SQUAD_POSITION_QUOTAS.items():
-        for _ in range(quota):
-            chosen: SquadPlayer | None = None
-            for candidate in pool_by_position[position]:
-                if candidate.player_id in picked_ids:
-                    continue
-                if club_counts.get(candidate.team_id, 0) >= MAX_PLAYERS_PER_CLUB:
-                    continue
-                if candidate.price > remaining_budget:
-                    continue
-                hypothetical_quota = dict(remaining_quota)
-                hypothetical_quota[position] -= 1
-                still_affordable = remaining_budget - candidate.price >= _min_remaining_cost(
-                    pool_by_position, hypothetical_quota, picked_ids | {candidate.player_id}
-                )
-                if still_affordable:
-                    chosen = candidate
-                    break
-            if chosen is None:
-                raise ValueError(
-                    f"cannot complete squad: no affordable {position} candidate available "
-                    "within the remaining budget/club constraints"
-                )
-            picked.append(chosen)
-            picked_ids.add(chosen.player_id)
-            club_counts[chosen.team_id] = club_counts.get(chosen.team_id, 0) + 1
-            remaining_budget -= chosen.price
-            remaining_quota[position] -= 1
+        available = counts.get(position, 0)
+        if available < quota:
+            raise ValueError(
+                f"cannot complete squad: only {available} {position} candidate(s) available, "
+                f"need {quota}"
+            )
+
+    picked = _solve_milp(candidates, budget)
+    if picked is None:
+        raise ValueError(
+            "cannot complete squad: no combination of candidates satisfies the budget, "
+            "position and per-club constraints together"
+        )
 
     return SquadSelection(players=tuple(picked))
 
