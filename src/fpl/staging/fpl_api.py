@@ -20,6 +20,7 @@ from fpl.staging.base import ColumnSpec, StagingReport, TableSpec, stage_frame
 __all__ = [
     "AVAILABILITY_SNAPSHOTS_SPEC",
     "ENTRY_SNAPSHOTS_SPEC",
+    "EVENT_LIVE_PLAYER_FIXTURE_STATS_SPEC",
     "EVENTS_SPEC",
     "FIXTURES_SPEC",
     "MANAGER_PICKS_SPEC",
@@ -30,6 +31,7 @@ __all__ = [
     "stage_availability_snapshots",
     "stage_bootstrap_static",
     "stage_entry_snapshots",
+    "stage_event_live",
     "stage_fixtures",
     "stage_manager_picks",
     "stage_price_snapshots",
@@ -134,6 +136,11 @@ EVENTS_SPEC = TableSpec(
         ColumnSpec("is_next", "is_next", pl.Boolean),
         ColumnSpec("is_previous", "is_previous", pl.Boolean),
         ColumnSpec("average_entry_score", "average_entry_score", pl.Int64, required=False),
+        # ``finished`` alone lags reality by up to a couple of days: bonus/BPS
+        # keep shifting until FPL marks the gameweek `data_checked`. Ingesting
+        # ``event_live`` before that would capture provisional numbers that
+        # later move (close-live-ingestion-gap.md).
+        ColumnSpec("data_checked", "data_checked", pl.Boolean, required=False),
     ),
 )
 
@@ -362,4 +369,196 @@ def stage_manager_picks(
         pl.lit(cohort).alias("cohort"),
         pl.Series("contaminated", [r["contaminated"] for r in rows]),
     ).select(["season", "cohort", *staged.columns, "contaminated"])
+    return staged, report
+
+
+# -- event_live -> player_fixture_stats (the live-ingestion gap, spec plan
+# close-live-ingestion-gap.md) --
+
+_ELEMENT_TYPE_TO_POSITION: dict[int, str] = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
+"""FPL's own numeric position code. Mirrors
+:data:`fpl.staging.vaastav._ELEMENT_TYPE_TO_POSITION` — duplicated rather than
+imported, so this module keeps depending only on what the live API itself
+provides (module docstring)."""
+
+_EVENT_LIVE_STATS_DROP = frozenset(
+    {"clean_sheets", "influence", "creativity", "threat", "ict_index", "in_dreamteam", "played"}
+)
+"""``event_live``'s own ``stats`` fields we deliberately never import — either
+derived ourselves (``clean_sheets``, from minutes+goals_conceded) or not
+modelled at all (spec §7 drops these same fields from every other FPL-API
+source, `staging/vaastav.py`'s ``_DROP_COMMON``)."""
+
+EVENT_LIVE_PLAYER_FIXTURE_STATS_SPEC = TableSpec(
+    table="player_fixture_stats",
+    key=("player_id", "fixture_id"),
+    columns=(
+        ColumnSpec("player_id", "player_id", pl.Int64),
+        ColumnSpec("fixture_id", "fixture_id", pl.Int64),
+        ColumnSpec("event", "event", pl.Int64),
+        ColumnSpec("kickoff_time", "kickoff_time", pl.Utf8, required=False),
+        ColumnSpec("was_home", "was_home", pl.Boolean, required=False),
+        ColumnSpec("opponent_team", "opponent_team", pl.Int64, required=False),
+        ColumnSpec("position", "position", pl.Utf8, required=False),
+        ColumnSpec("player_code", "player_code", pl.Utf8, required=False),
+        ColumnSpec("minutes", "minutes", pl.Int64),
+        ColumnSpec("starts", "starts", pl.Int64, required=False),
+        ColumnSpec("goals_scored", "goals_scored", pl.Int64),
+        ColumnSpec("assists", "assists", pl.Int64),
+        ColumnSpec("goals_conceded", "goals_conceded", pl.Int64),
+        ColumnSpec("own_goals", "own_goals", pl.Int64),
+        ColumnSpec("penalties_saved", "penalties_saved", pl.Int64),
+        ColumnSpec("penalties_missed", "penalties_missed", pl.Int64),
+        ColumnSpec("yellow_cards", "yellow_cards", pl.Int64),
+        ColumnSpec("red_cards", "red_cards", pl.Int64),
+        ColumnSpec("saves", "saves", pl.Int64),
+        ColumnSpec("bonus_fpl", "bonus", pl.Int64),
+        ColumnSpec("bps_fpl", "bps", pl.Int64),
+        ColumnSpec("total_points_fpl", "total_points", pl.Int64),
+        ColumnSpec(
+            "clearances_blocks_interceptions",
+            "clearances_blocks_interceptions",
+            pl.Int64,
+            required=False,
+        ),
+        ColumnSpec("tackles", "tackles", pl.Int64, required=False),
+        ColumnSpec("recoveries", "recoveries", pl.Int64, required=False),
+        ColumnSpec("defensive_contribution", "defensive_contribution", pl.Int64, required=False),
+        ColumnSpec("expected_goals", "expected_goals", pl.Float64, required=False),
+        ColumnSpec("expected_assists", "expected_assists", pl.Float64, required=False),
+        ColumnSpec(
+            "expected_goal_involvements", "expected_goal_involvements", pl.Float64, required=False
+        ),
+        ColumnSpec(
+            "expected_goals_conceded", "expected_goals_conceded", pl.Float64, required=False
+        ),
+        # The ~15 detailed BPS-input columns (attempted_passes, key_passes,
+        # etc.) are never present in event_live — FPL retired this Opta-era
+        # breakdown before 2020/21 (Finding 2, `facts/player_fixture.py`).
+        # Declared here, absent from the raw frame below, so they null-fill
+        # exactly like every other season since, rather than needing a
+        # special case.
+        ColumnSpec("attempted_passes", "attempted_passes", pl.Int64, required=False),
+        ColumnSpec("completed_passes", "completed_passes", pl.Int64, required=False),
+        ColumnSpec("key_passes", "key_passes", pl.Int64, required=False),
+        ColumnSpec("big_chances_created", "big_chances_created", pl.Int64, required=False),
+        ColumnSpec("big_chances_missed", "big_chances_missed", pl.Int64, required=False),
+        ColumnSpec("open_play_crosses", "open_play_crosses", pl.Int64, required=False),
+        ColumnSpec("dribbles", "dribbles", pl.Int64, required=False),
+        ColumnSpec("tackled", "tackled", pl.Int64, required=False),
+        ColumnSpec("fouls", "fouls", pl.Int64, required=False),
+        ColumnSpec("offside", "offside", pl.Int64, required=False),
+        ColumnSpec("target_missed", "target_missed", pl.Int64, required=False),
+        ColumnSpec("errors_leading_to_goal", "errors_leading_to_goal", pl.Int64, required=False),
+        ColumnSpec(
+            "errors_leading_to_goal_attempt",
+            "errors_leading_to_goal_attempt",
+            pl.Int64,
+            required=False,
+        ),
+        ColumnSpec("penalties_conceded", "penalties_conceded", pl.Int64, required=False),
+        ColumnSpec("winning_goals", "winning_goals", pl.Int64, required=False),
+    ),
+    drop=_EVENT_LIVE_STATS_DROP,
+)
+
+
+def stage_event_live(
+    body: bytes,
+    season: Season,
+    event: int,
+    *,
+    players: pl.DataFrame,
+    fixtures: pl.DataFrame,
+) -> tuple[pl.DataFrame, StagingReport]:
+    """Stage one gameweek's ``event/{event}/live/`` capture into
+    ``player_fixture_stats`` rows for the current, in-progress season.
+
+    Matches ``stage_merged_gw``'s E7 output shape column-for-column, so
+    ``facts/player_fixture.py`` needs no source-specific branch — the two
+    only ever populate disjoint seasons.
+
+    ``players`` and ``fixtures`` must already be staged for ``season`` (an
+    empty frame yields an all-null ``opponent_team``/``was_home``/
+    ``position``, not a failure — mirrors ``_with_team_codes``'s "absent
+    input -> null, log, don't fail" convention; the caller is expected to log
+    that condition itself, since it has the season/table context to say so).
+
+    A player with more than one fixture this gameweek (a "double gameweek")
+    is skipped and counted in the report's ``excluded`` dict: ``event_live``'s
+    per-player ``stats`` block is a gameweek total, not split by fixture, so a
+    double-gameweek row cannot be attributed to one fixture without guessing
+    — left absent rather than guessed at (mirrors
+    ``_derive_team_id_from_fixture``'s "ambiguous -> refuse" stance).
+    """
+    payload: dict[str, Any] = json.loads(body)
+    elements: list[dict[str, Any]] = payload.get("elements", [])
+
+    rows: list[dict[str, Any]] = []
+    double_gameweek = 0
+    for element in elements:
+        explain = element.get("explain") or []
+        fixture_ids = [item["fixture"] for item in explain if item.get("fixture") is not None]
+        if not fixture_ids:
+            continue  # a blank gameweek for this player: no fixture to attach the row to
+        if len(fixture_ids) > 1:
+            double_gameweek += 1
+            continue
+        row = dict(element.get("stats") or {})
+        row["player_id"] = element["id"]
+        row["fixture_id"] = fixture_ids[0]
+        rows.append(row)
+
+    if not rows:
+        report = StagingReport(
+            "player_fixture_stats",
+            len(elements),
+            0,
+            (),
+            excluded={"double_gameweek": double_gameweek},
+        )
+        return pl.DataFrame(), report
+
+    raw = pl.DataFrame(rows).with_columns(pl.lit(event).alias("event"))
+
+    player_lookup = (
+        players.select("player_id", "code", "team_id", "element_type")
+        .with_columns(pl.col("code").cast(pl.Utf8).alias("player_code"))
+        .drop("code")
+    )
+    raw = raw.join(player_lookup, on="player_id", how="left")
+
+    fixture_lookup = fixtures.select("fixture_id", "team_h", "team_a", "kickoff_time")
+    raw = raw.join(fixture_lookup, on="fixture_id", how="left")
+
+    raw = raw.with_columns(
+        pl.when(pl.col("team_id") == pl.col("team_h"))
+        .then(True)
+        .when(pl.col("team_id") == pl.col("team_a"))
+        .then(False)
+        .otherwise(None)
+        .alias("was_home"),
+        pl.when(pl.col("team_id") == pl.col("team_h"))
+        .then(pl.col("team_a"))
+        .when(pl.col("team_id") == pl.col("team_a"))
+        .then(pl.col("team_h"))
+        .otherwise(None)
+        .cast(pl.Int64)
+        .alias("opponent_team"),
+        pl.col("element_type")
+        .replace_strict(_ELEMENT_TYPE_TO_POSITION, default=None, return_dtype=pl.Utf8)
+        .alias("position"),
+    ).drop(["team_id", "element_type", "team_h", "team_a"])
+
+    staged, report = stage_frame(raw, EVENT_LIVE_PLAYER_FIXTURE_STATS_SPEC)
+    staged = staged.with_columns(pl.lit(str(season)).alias("season")).select(
+        ["season", *staged.columns]
+    )
+    report = StagingReport(
+        report.table,
+        report.rows_in,
+        report.rows_out,
+        report.unknown_columns,
+        excluded={"double_gameweek": double_gameweek},
+    )
     return staged, report
