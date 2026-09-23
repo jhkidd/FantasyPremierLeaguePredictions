@@ -7,6 +7,7 @@ corrupt what is already on disk.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -14,9 +15,15 @@ from fpl.config import Season
 from fpl.log import event as log_event
 from fpl.log import get_logger
 from fpl.sources.fpl_api import FplApiConnector
-from fpl.storage.raw_io import WriteResult, write_raw
+from fpl.storage import paths
+from fpl.storage.raw_io import WriteResult, read_raw, write_raw
 
-__all__ = ["ROUTINE_ENDPOINTS", "SUPPORTED_ENDPOINTS", "ingest_fpl"]
+__all__ = [
+    "ROUTINE_ENDPOINTS",
+    "SUPPORTED_ENDPOINTS",
+    "ingest_fpl",
+    "missing_event_live_captures",
+]
 
 logger = get_logger(__name__)
 
@@ -52,6 +59,13 @@ def ingest_fpl(
 
     Idempotent: re-running with unchanged upstream data writes nothing, because
     storage is content-addressed.
+
+    ``event-live`` with no ``--event`` auto-discovers: every finished,
+    finalised (``data_checked``) gameweek this season with no capture on disk
+    yet is fetched, one request each. This is also how a season's worth of
+    gaps gets backfilled — the same endpoint serves any past gameweek's
+    finalised stats, not just the newest one, so there is no separate
+    backfill mechanism (close-live-ingestion-gap.md).
     """
     selected = tuple(endpoints) if endpoints else _routine_endpoints(entry_id)
     unknown = [name for name in selected if name not in SUPPORTED_ENDPOINTS]
@@ -62,29 +76,65 @@ def ingest_fpl(
     connector = connector or FplApiConnector(season)
     results: list[WriteResult] = []
 
+    def _store(artifact) -> None:
+        result = write_raw(artifact, force=force, data_root=data_root)
+        results.append(result)
+        log_event(
+            logger,
+            "ingested",
+            source="fpl",
+            endpoint=artifact.endpoint,
+            season=season,
+            event=artifact.event,
+            status=artifact.http_status,
+            bytes=len(artifact.body),
+            sha=artifact.sha256[:12],
+            stored=result.reason,
+            path=result.path,
+        )
+
     try:
         for name in selected:
-            artifact = _fetch(connector, name, event=event, player_id=player_id, entry_id=entry_id)
-            result = write_raw(artifact, force=force, data_root=data_root)
-            results.append(result)
-            log_event(
-                logger,
-                "ingested",
-                source="fpl",
-                endpoint=artifact.endpoint,
-                season=season,
-                event=artifact.event,
-                status=artifact.http_status,
-                bytes=len(artifact.body),
-                sha=artifact.sha256[:12],
-                stored=result.reason,
-                path=result.path,
-            )
+            if name == "event-live" and event is None:
+                for candidate in missing_event_live_captures(season, data_root=data_root):
+                    _store(connector.event_live(candidate))
+                continue
+            _store(_fetch(connector, name, event=event, player_id=player_id, entry_id=entry_id))
     finally:
         if owns_connector:
             connector.close()
 
     return results
+
+
+def missing_event_live_captures(season: Season, *, data_root: Path | None = None) -> list[int]:
+    """Which finished + finalised (``data_checked``) gameweeks this season
+    have no ``event_live`` raw capture on disk yet.
+
+    Reads the most recent ``bootstrap-static`` raw capture already on disk
+    rather than the staged ``events`` table, so this never depends on staging
+    having already run this session — the same convention
+    ``facts/player_fixture.py``'s ``_with_team_codes`` documents.
+    ``data_checked`` lags ``finished`` by up to a day or two: until FPL sets
+    it, bonus/BPS can still shift, so ingesting early would capture
+    provisional numbers that later move (close-live-ingestion-gap.md).
+
+    Returns an empty list, not an error, when no bootstrap-static capture
+    exists yet (e.g. before the first daily snapshot has ever run).
+    """
+    partition = paths.latest_partition("fpl", "bootstrap_static", season, data_root=data_root)
+    if partition is None:
+        return []
+    body, _meta = read_raw(partition)
+    payload = json.loads(body)
+    finalized = [
+        e["id"] for e in payload.get("events", []) if e.get("finished") and e.get("data_checked")
+    ]
+    return [
+        e
+        for e in finalized
+        if paths.latest_partition("fpl", "event_live", season, event=e, data_root=data_root) is None
+    ]
 
 
 def _routine_endpoints(entry_id: int | None) -> tuple[str, ...]:

@@ -245,7 +245,16 @@ def ingest(
         str | None,
         typer.Option("--endpoint", help="Endpoint to pull. Omit for the routine set."),
     ] = None,
-    event: Annotated[int | None, typer.Option("--event", help="Gameweek number.")] = None,
+    event: Annotated[
+        int | None,
+        typer.Option(
+            "--event",
+            help=(
+                "Gameweek number. Required for most endpoints; for 'event-live' omit it to "
+                "auto-fetch every finished, finalised gameweek not yet captured."
+            ),
+        ),
+    ] = None,
     player: Annotated[int | None, typer.Option("--player", help="FPL element id.")] = None,
     entry: Annotated[
         int | None,

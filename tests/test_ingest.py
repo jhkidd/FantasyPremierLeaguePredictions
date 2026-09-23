@@ -8,7 +8,7 @@ import pytest
 import respx
 
 from fpl.config import Season, SourceConfig
-from fpl.ingest import ROUTINE_ENDPOINTS, ingest_fpl
+from fpl.ingest import ROUTINE_ENDPOINTS, ingest_fpl, missing_event_live_captures
 from fpl.sources.errors import BlockedError
 from fpl.sources.fetcher import HttpFetcher
 from fpl.sources.fpl_api import FplApiConnector
@@ -123,9 +123,13 @@ class TestEndpointSelection:
         )
 
     @respx.mock
-    def test_event_live_requires_an_event(self, connector: FplApiConnector) -> None:
-        with pytest.raises(ValueError, match="requires --event"):
-            ingest_fpl(SEASON, ["event-live"], connector=connector)
+    def test_event_live_with_no_bootstrap_capture_yet_fetches_nothing(
+        self, connector: FplApiConnector
+    ) -> None:
+        """Auto-discovery needs a bootstrap-static capture on disk to know
+        which gameweeks are finalised; none yet is a clean no-op, not an
+        error (close-live-ingestion-gap.md)."""
+        assert ingest_fpl(SEASON, ["event-live"], connector=connector) == []
 
     @respx.mock
     def test_element_summary_requires_a_player(self, connector: FplApiConnector) -> None:
@@ -156,6 +160,64 @@ class TestEndpointSelection:
             with pytest.raises(ValueError):
                 ingest_fpl(SEASON, ["bootstrap-static", "nonesuch"], connector=connector)
             assert route.call_count == 0
+
+
+class TestEventLiveAutoDiscovery:
+    """``event-live`` with no ``--event`` auto-discovers finished, finalised
+    gameweeks not yet captured — the same mechanism serves both the nightly
+    steady-state case and a full-season backfill (close-live-ingestion-gap.md).
+    """
+
+    @staticmethod
+    def _bootstrap(events: list[dict]) -> dict:
+        return {"elements": [{"id": 1}], "teams": [{"id": 1}], "events": events}
+
+    @respx.mock
+    def test_fetches_finished_and_checked_events_only(self, connector: FplApiConnector) -> None:
+        payload = self._bootstrap(
+            [
+                {"id": 1, "finished": True, "data_checked": True},
+                {"id": 2, "finished": True, "data_checked": False},
+                {"id": 3, "finished": False, "data_checked": False},
+            ]
+        )
+        respx.get(f"{BASE}/bootstrap-static/").mock(return_value=httpx.Response(200, json=payload))
+        ingest_fpl(SEASON, ["bootstrap-static"], connector=connector)
+
+        route = respx.get(f"{BASE}/event/1/live/").mock(
+            return_value=httpx.Response(200, json={"elements": [{"id": 1}]})
+        )
+        results = ingest_fpl(SEASON, ["event-live"], connector=connector)
+
+        assert route.call_count == 1
+        assert len(results) == 1
+        assert "event=1" in str(results[0].path)
+
+    @respx.mock
+    def test_an_already_captured_event_is_not_refetched(self, connector: FplApiConnector) -> None:
+        payload = self._bootstrap([{"id": 1, "finished": True, "data_checked": True}])
+        respx.get(f"{BASE}/bootstrap-static/").mock(return_value=httpx.Response(200, json=payload))
+        ingest_fpl(SEASON, ["bootstrap-static"], connector=connector)
+        respx.get(f"{BASE}/event/1/live/").mock(
+            return_value=httpx.Response(200, json={"elements": [{"id": 1}]})
+        )
+        ingest_fpl(SEASON, ["event-live"], connector=connector)
+
+        results = ingest_fpl(SEASON, ["event-live"], connector=connector)
+        assert results == []
+
+    @respx.mock
+    def test_missing_event_live_captures_helper(self, connector: FplApiConnector) -> None:
+        payload = self._bootstrap(
+            [
+                {"id": 1, "finished": True, "data_checked": True},
+                {"id": 2, "finished": True, "data_checked": True},
+            ]
+        )
+        respx.get(f"{BASE}/bootstrap-static/").mock(return_value=httpx.Response(200, json=payload))
+        ingest_fpl(SEASON, ["bootstrap-static"], connector=connector)
+
+        assert missing_event_live_captures(SEASON) == [1, 2]
 
 
 class TestFailures:
