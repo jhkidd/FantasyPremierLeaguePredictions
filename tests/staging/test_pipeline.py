@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fpl.config import Season
+from fpl.facts.player_fixture import build_player_fixture_facts
 from fpl.quality.checks import check_staged_tables
 from fpl.quality.gates import has_blocking_violations
 from fpl.staging.pipeline import (
@@ -81,6 +83,22 @@ def _write_fixtures(data_root: Path, moment: datetime) -> None:
         body=body,
         fetched_at=moment,
         connector_version="1",
+    )
+    write_raw(artifact, data_root=data_root)
+
+
+def _write_event_live(data_root: Path, moment: datetime, event: int, elements: list[dict]) -> None:
+    body = json.dumps({"elements": elements}).encode()
+    artifact = RawArtifact(
+        source="fpl",
+        endpoint="event_live",
+        season=SEASON,
+        url=f"https://fantasy.premierleague.com/api/event/{event}/live/",
+        http_status=200,
+        body=body,
+        fetched_at=moment,
+        connector_version="1",
+        event=event,
     )
     write_raw(artifact, data_root=data_root)
 
@@ -404,6 +422,97 @@ class TestStageFplSourceEndToEnd:
 
         violations = check_staged_tables(SEASON, data_root=data_root)
         assert not has_blocking_violations(violations)
+
+
+class TestStageEventLivePipelineEndToEnd:
+    """The current, in-progress season's only source of ``player_fixture_stats``
+    (close-live-ingestion-gap.md)."""
+
+    _ELEMENT = {
+        "id": 1,
+        "stats": {
+            "minutes": 90,
+            "goals_scored": 0,
+            "assists": 0,
+            "clean_sheets": 0,
+            "goals_conceded": 1,
+            "own_goals": 0,
+            "penalties_saved": 0,
+            "penalties_missed": 0,
+            "yellow_cards": 0,
+            "red_cards": 0,
+            "saves": 0,
+            "bonus": 1,
+            "bps": 20,
+            "clearances_blocks_interceptions": 2,
+            "tackles": 1,
+            "recoveries": 4,
+            "defensive_contribution": 7,
+            "starts": 1,
+            "expected_goals": "0.10",
+            "expected_assists": "0.05",
+            "expected_goal_involvements": "0.15",
+            "expected_goals_conceded": "1.10",
+            "total_points": 7,
+            "in_dreamteam": False,
+            "played": True,
+        },
+        "explain": [{"fixture": 1, "stats": []}],
+        "modified": False,
+    }
+
+    def test_stages_player_fixture_stats_from_a_captured_gameweek(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        moment = datetime(2026, 8, 1, tzinfo=UTC)
+        _write_bootstrap(data_root, moment)
+        _write_fixtures(data_root, moment)
+        _write_event_live(data_root, moment, 1, [self._ELEMENT])
+
+        results = stage_fpl_source(SEASON, data_root=data_root)
+        [result] = [r for r in results if r.table == "player_fixture_stats"]
+        assert result.written
+        assert result.rows == 1
+
+    def test_facts_can_be_built_from_the_staged_output(self, tmp_path: Path) -> None:
+        """The whole point: `facts/player_fixture.py` reads
+        ``player_fixture_stats`` unconditionally, so no source-specific
+        branch is needed for the live season to produce real facts."""
+        data_root = tmp_path / "data"
+        moment = datetime(2026, 8, 1, tzinfo=UTC)
+        _write_bootstrap(data_root, moment)
+        _write_fixtures(data_root, moment)
+        _write_event_live(data_root, moment, 1, [self._ELEMENT])
+        stage_fpl_source(SEASON, data_root=data_root)
+
+        frame = build_player_fixture_facts(SEASON, data_root=data_root)
+        assert frame is not None
+        assert frame.height == 1
+        row = frame.row(0, named=True)
+        assert row["player_id"] == 1
+        assert row["fixture_id"] == 1
+        assert row["was_home"] is True
+        assert row["opponent_team_id"] == 7
+        assert row["obs_defensive"] is True
+        assert row["obs_bps_inputs"] is False
+
+    def test_no_capture_yet_is_a_clean_skip(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        moment = datetime(2026, 8, 1, tzinfo=UTC)
+        _write_bootstrap(data_root, moment)
+        _write_fixtures(data_root, moment)
+
+        results = stage_fpl_source(SEASON, data_root=data_root)
+        assert not any(r.table == "player_fixture_stats" for r in results)
+
+    def test_missing_players_table_is_reported_not_raised(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        moment = datetime(2026, 8, 1, tzinfo=UTC)
+        _write_event_live(data_root, moment, 1, [self._ELEMENT])
+
+        results = stage_fpl_source(SEASON, data_root=data_root)
+        [result] = [r for r in results if r.table == "player_fixture_stats"]
+        assert not result.written
+        assert "not staged" in result.detail
 
 
 class TestStageVaastavSourceEndToEnd:

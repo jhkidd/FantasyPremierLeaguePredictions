@@ -27,6 +27,7 @@ from fpl.staging.fpl_api import (
     stage_availability_snapshots,
     stage_bootstrap_static,
     stage_entry_snapshots,
+    stage_event_live,
     stage_fixtures,
     stage_manager_picks,
     stage_price_snapshots,
@@ -231,6 +232,78 @@ def _stage_manager_picks(
     return results
 
 
+def _stage_event_live(
+    season: Season, data_root: Path | None, tables: set[str] | None
+) -> list[StageResult]:
+    """Stage every captured ``event_live`` gameweek into ``player_fixture_stats``.
+
+    This is the current, in-progress season's only source of that table — the
+    vaastav archive always lags a season behind (close-live-ingestion-gap.md).
+    Absent input at any stage (no captures yet, ``players``/``fixtures`` not
+    staged yet) is reported and skipped, never raised: staging one source must
+    never depend on another source's step having already run this session
+    (the same convention `facts/player_fixture.py`'s ``_with_team_codes``
+    documents).
+    """
+    if tables is not None and "player_fixture_stats" not in tables:
+        return []
+
+    parent = paths.raw_endpoint_dir("fpl", "event_live", season, data_root=data_root)
+    if not parent.is_dir():
+        return []
+    event_dirs = sorted(p for p in parent.iterdir() if p.is_dir() and p.name.startswith("event="))
+    if not event_dirs:
+        return []
+
+    players_path = paths.staged_table("players", season, data_root=data_root) / "part.parquet"
+    fixtures_path = paths.staged_table("fixtures", season, data_root=data_root) / "part.parquet"
+    if not players_path.exists() or not fixtures_path.exists():
+        return [
+            StageResult(
+                "player_fixture_stats",
+                False,
+                0,
+                None,
+                "players/fixtures not staged yet for this season",
+            )
+        ]
+    players = read_parquet(players_path)
+    fixtures_table = read_parquet(fixtures_path)
+
+    frames: list[pl.DataFrame] = []
+    last_report: StagingReport | None = None
+    for event_dir in event_dirs:
+        event = int(event_dir.name.removeprefix("event="))
+        partition = paths.latest_partition(
+            "fpl", "event_live", season, event=event, data_root=data_root
+        )
+        if partition is None:
+            continue
+        body, _meta = read_raw(partition)
+        staged, report = stage_event_live(
+            body, season, event, players=players, fixtures=fixtures_table
+        )
+        last_report = report
+        if staged.height:
+            frames.append(staged)
+
+    if not frames:
+        return [
+            StageResult(
+                "player_fixture_stats",
+                False,
+                0,
+                last_report,
+                "no player_fixture_stats rows produced from event_live captures",
+            )
+        ]
+    combined = pl.concat(frames)
+    _write(
+        combined, "player_fixture_stats", season, ("player_id", "fixture_id"), data_root=data_root
+    )
+    return [StageResult("player_fixture_stats", True, combined.height, last_report)]
+
+
 def stage_fpl_source(
     season: Season,
     *,
@@ -248,6 +321,7 @@ def stage_fpl_source(
     results += _stage_snapshots(season, data_root, tables)
     results += _stage_entry_snapshots(season, data_root, tables)
     results += _stage_manager_picks(season, data_root, tables)
+    results += _stage_event_live(season, data_root, tables)
     return results
 
 
