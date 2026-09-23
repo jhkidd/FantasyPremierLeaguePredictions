@@ -162,6 +162,20 @@ and verify CI green (`gh run watch`) before the next step.
     triggers step 15's publish workflow.
 17. Manually verify the deployed Pages URL renders the real recommendation end-to-end.
 
+    **Outcome (2026-09-23):** both workflows are live and verified green (`gh run watch`).
+    `publish-site.yml` deploys successfully; the live URL serves `index.html`/`app.js`/`style.css`
+    (200) and `data/predictions/latest.json` correctly 404s (nothing archived yet), which `app.js`
+    turns into its "not published yet" fallback — the same path already exercised by the jsdom
+    smoke test in step 14. `weekly-predict.yml`'s first real run surfaced a genuine bug: `predict`
+    can produce a non-empty, entirely-null frame (the live-ingestion gap, steps 8/13) that the old
+    row-count check accepted and archived — fixed by treating an all-null result the same as
+    "nothing to predict" (commit `ee795b1`), plus a workflow guard for the case where
+    `data/predictions/` doesn't exist yet at all (commit `d82621b`, since git doesn't track empty
+    directories). A second manual re-run confirmed a fully clean skip: predict skips, optimise is
+    correctly not attempted, nothing is committed. No real recommendation exists yet — end-to-end
+    "renders the real recommendation" is still blocked on the live-ingestion gap, not on anything
+    in this phase.
+
 ### Explicitly out of scope for this task (carried forward)
 
 Tuning (§3.3), the full walk-forward backtest harness (§3.4), transfers/chip-timing strategy, a
