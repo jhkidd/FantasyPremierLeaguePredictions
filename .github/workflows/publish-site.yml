@@ -3,16 +3,23 @@ name: Publish site
 # The Pages artifact is site/ plus data/predictions/ copied alongside it, so
 # app.js's same-origin fetch("data/predictions/latest.json") works without
 # CORS or cross-repo raw-content fetching. Triggered by either changing —
-# site/** for a code change, data/predictions/** because weekly-predict.yml
-# just committed a new recommendation (Phase E step 16,
-# .github/context/subsystem3-close-and-mvp-site.md).
-
+# site/** for a human's code change, data/predictions/** for a human's data
+# change — but a bot commit (weekly-predict.yml's `git push` using the
+# default GITHUB_TOKEN) does NOT fire a workflow's `push` trigger at all:
+# GitHub suppresses that specifically to prevent runaway recursive workflow
+# chains (https://docs.github.com/actions/using-workflows/triggering-a-workflow#triggering-a-workflow-from-a-workflow).
+# So the `push` triggers above only ever fire for this repo's own commits;
+# the real weekly path is the `workflow_run` trigger below, which reacts to
+# *that* workflow's own run completing rather than to the commit it made.
 on:
   push:
     branches: [master]
     paths:
       - "site/**"
       - "data/predictions/**"
+  workflow_run:
+    workflows: ["Weekly predict and optimise"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -29,8 +36,19 @@ concurrency:
 
 jobs:
   build:
+    # weekly-predict.yml's own steps are all `continue-on-error: true` (the
+    # "run often, skip gracefully" shape it shares with daily-snapshot.yml),
+    # so its job itself still reports success even on a day it committed
+    # nothing new — a redundant redeploy of identical content on those days
+    # is harmless, so no extra guard is needed here beyond "that run didn't
+    # itself fail outright".
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
+      # No explicit `ref:` needed: a `workflow_run` event's default checkout
+      # ref is the repository's default branch (master) at its current tip —
+      # exactly the commit weekly-predict.yml just pushed, not the older
+      # commit that was checked out when that workflow started.
       - uses: actions/checkout@v4
 
       - name: Assemble the Pages bundle

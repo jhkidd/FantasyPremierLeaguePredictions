@@ -176,6 +176,23 @@ and verify CI green (`gh run watch`) before the next step.
     "renders the real recommendation" is still blocked on the live-ingestion gap, not on anything
     in this phase.
 
+    **Second outcome (2026-09-23, after the live-ingestion gap closed):** with real, non-null
+    predictions flowing, `weekly-predict.yml` committed a genuine recommendation for the first
+    time — but the site still showed "not published yet", exposing a second real bug in "which in
+    turn triggers step 15's publish workflow" above: it doesn't. GitHub suppresses a workflow's
+    `push` trigger specifically for commits made by *another* workflow using the default
+    `GITHUB_TOKEN` (anti-recursion protection), so `weekly-predict.yml`'s own `git push` can never
+    fire `publish-site.yml`'s `push: paths: data/predictions/**` trigger — confirmed by history:
+    no `publish-site.yml` run had ever been triggered by a bot commit, only by human pushes and
+    manual `workflow_dispatch`. Fixed by adding a `workflow_run: workflows: ["Weekly predict and
+    optimise"], types: [completed]` trigger to `publish-site.yml`, which reacts to that workflow's
+    run *completing* rather than to the commit it made, sidestepping the restriction entirely.
+    Verified: manually triggering `weekly-predict.yml` produced a real squad recommendation;
+    manually triggering `publish-site.yml` (standing in for the new automatic trigger, since it
+    wasn't live for that specific run yet) deployed it, and the live URL now serves a real
+    `latest.json` pointing at a genuine `squad.json`. The next scheduled `weekly-predict.yml` run
+    will be the first to confirm the new `workflow_run` trigger fires automatically end-to-end.
+
 ### Explicitly out of scope for this task (carried forward)
 
 Tuning (§3.3), the full walk-forward backtest harness (§3.4), transfers/chip-timing strategy, a
