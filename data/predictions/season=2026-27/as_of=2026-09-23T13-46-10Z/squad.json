@@ -1,0 +1,237 @@
+{
+  "season": "2026-27",
+  "as_of": "2026-09-23T13:46:10Z",
+  "budget": 100.0,
+  "total_price": 71.3,
+  "total_predicted_points": 45.88967956783178,
+  "squad": [
+    {
+      "player_id": 572,
+      "team_id": 11,
+      "position": "GK",
+      "price": 4.6000000000000005,
+      "predicted_points": 4.015029454924251
+    },
+    {
+      "player_id": 250,
+      "team_id": 10,
+      "position": "GK",
+      "price": 4.5,
+      "predicted_points": 3.2299748896178757
+    },
+    {
+      "player_id": 305,
+      "team_id": 12,
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.619149851729207
+    },
+    {
+      "player_id": 176,
+      "team_id": 7,
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.4639054422649225
+    },
+    {
+      "player_id": 173,
+      "team_id": 7,
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.4544593121836558
+    },
+    {
+      "player_id": 304,
+      "team_id": 12,
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.4425581857958183
+    },
+    {
+      "player_id": 259,
+      "team_id": 12,
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.438860404439332
+    },
+    {
+      "player_id": 127,
+      "team_id": 5,
+      "position": "MID",
+      "price": 5.0,
+      "predicted_points": 3.0449540249183706
+    },
+    {
+      "player_id": 124,
+      "team_id": 5,
+      "position": "MID",
+      "price": 5.800000000000001,
+      "predicted_points": 3.4619232154220376
+    },
+    {
+      "player_id": 214,
+      "team_id": 8,
+      "position": "MID",
+      "price": 5.0,
+      "predicted_points": 2.9649298966508946
+    },
+    {
+      "player_id": 47,
+      "team_id": 2,
+      "position": "MID",
+      "price": 5.0,
+      "predicted_points": 2.931163853579355
+    },
+    {
+      "player_id": 290,
+      "team_id": 11,
+      "position": "MID",
+      "price": 4.5,
+      "predicted_points": 2.635504313782813
+    },
+    {
+      "player_id": 249,
+      "team_id": 9,
+      "position": "FWD",
+      "price": 5.6000000000000005,
+      "predicted_points": 3.795585487233598
+    },
+    {
+      "player_id": 552,
+      "team_id": 20,
+      "position": "FWD",
+      "price": 5.7,
+      "predicted_points": 3.8006717676096136
+    },
+    {
+      "player_id": 138,
+      "team_id": 5,
+      "position": "FWD",
+      "price": 5.6000000000000005,
+      "predicted_points": 3.5910094676800357
+    }
+  ],
+  "starting_xi": [
+    {
+      "player_id": 572,
+      "team_id": 11,
+      "position": "GK",
+      "price": 4.6000000000000005,
+      "predicted_points": 4.015029454924251
+    },
+    {
+      "player_id": 305,
+      "team_id": 12,
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.619149851729207
+    },
+    {
+      "player_id": 176,
+      "team_id": 7,
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.4639054422649225
+    },
+    {
+      "player_id": 173,
+      "team_id": 7,
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.4544593121836558
+    },
+    {
+      "player_id": 127,
+      "team_id": 5,
+      "position": "MID",
+      "price": 5.0,
+      "predicted_points": 3.0449540249183706
+    },
+    {
+      "player_id": 124,
+      "team_id": 5,
+      "position": "MID",
+      "price": 5.800000000000001,
+      "predicted_points": 3.4619232154220376
+    },
+    {
+      "player_id": 214,
+      "team_id": 8,
+      "position": "MID",
+      "price": 5.0,
+      "predicted_points": 2.9649298966508946
+    },
+    {
+      "player_id": 47,
+      "team_id": 2,
+      "position": "MID",
+      "price": 5.0,
+      "predicted_points": 2.931163853579355
+    },
+    {
+      "player_id": 249,
+      "team_id": 9,
+      "position": "FWD",
+      "price": 5.6000000000000005,
+      "predicted_points": 3.795585487233598
+    },
+    {
+      "player_id": 552,
+      "team_id": 20,
+      "position": "FWD",
+      "price": 5.7,
+      "predicted_points": 3.8006717676096136
+    },
+    {
+      "player_id": 138,
+      "team_id": 5,
+      "position": "FWD",
+      "price": 5.6000000000000005,
+      "predicted_points": 3.5910094676800357
+    }
+  ],
+  "bench": [
+    {
+      "player_id": 250,
+      "team_id": 10,
+      "position": "GK",
+      "price": 4.5,
+      "predicted_points": 3.2299748896178757
+    },
+    {
+      "player_id": 290,
+      "team_id": 11,
+      "position": "MID",
+      "price": 4.5,
+      "predicted_points": 2.635504313782813
+    },
+    {
+      "player_id": 304,
+      "team_id": 12,
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.4425581857958183
+    },
+    {
+      "player_id": 259,
+      "team_id": 12,
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.438860404439332
+    }
+  ],
+  "captain": {
+    "player_id": 572,
+    "team_id": 11,
+    "position": "GK",
+    "price": 4.6000000000000005,
+    "predicted_points": 4.015029454924251
+  },
+  "vice_captain": {
+    "player_id": 552,
+    "team_id": 20,
+    "position": "FWD",
+    "price": 5.7,
+    "predicted_points": 3.8006717676096136
+  }
+}
