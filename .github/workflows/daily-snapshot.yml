@@ -49,6 +49,17 @@ jobs:
           FPL_ENTRY_ID: ${{ vars.FPL_ENTRY_ID }}
         run: uv run fpl --verbose ingest fpl ${{ inputs.force && '--force' || '' }}
 
+      # Closes the live-ingestion gap (.github/context/close-live-ingestion-gap.md):
+      # auto-discovers every finished + finalised gameweek this season without an
+      # event_live capture yet (normally just last week's, but also serves as a
+      # one-shot backfill) and fetches it. continue-on-error because a miss here
+      # degrades the current season's rolling features rather than the whole
+      # snapshot; caught by the Tier 2 issue-raising step below.
+      - name: Ingest event-live
+        id: ingest_event_live
+        continue-on-error: true
+        run: uv run fpl --verbose ingest fpl --endpoint event-live
+
       # Phase 7 Tier 2 context sources (plan §7). Club Elo is deliberately not
       # here: a live runner probe (2026-08-24) found it unreachable on both
       # HTTP and HTTPS from an Actions runner (TCP connects then silently
@@ -179,6 +190,7 @@ jobs:
           O_INGEST_UNDERSTAT_LEAGUE: ${{ steps.ingest_understat_league.outcome }}
           O_INGEST_UNDERSTAT_MATCHES: ${{ steps.ingest_understat_matches.outcome }}
           O_STAGE_UNDERSTAT: ${{ steps.stage_understat.outcome }}
+          O_INGEST_EVENT_LIVE: ${{ steps.ingest_event_live.outcome }}
           O_FACTS_CHECK: ${{ steps.facts_check.outcome }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -187,7 +199,7 @@ jobs:
           failed=""
           for name in INGEST_OPENFOOTBALL STAGE_OPENFOOTBALL INGEST_FOOTBALLDATA \
                       STAGE_FOOTBALLDATA INGEST_UNDERSTAT_LEAGUE INGEST_UNDERSTAT_MATCHES \
-                      STAGE_UNDERSTAT FACTS_CHECK; do
+                      STAGE_UNDERSTAT INGEST_EVENT_LIVE FACTS_CHECK; do
             var="O_${name}"
             if [ "${!var}" = "failure" ]; then
               failed="${failed} ${name}"
