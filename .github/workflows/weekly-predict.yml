@@ -1,0 +1,67 @@
+name: Weekly predict and optimise
+
+# FPL gameweek deadlines don't fall on one fixed weekday/time (Friday
+# evening most weeks, but not always), so rather than model deadline times
+# exactly this runs daily and relies on `fpl predict`/`fpl optimise` already
+# being no-ops (a clean non-zero exit, no partial write) when there is
+# nothing new in the horizon yet — the same "run often, skip gracefully"
+# shape as daily-snapshot.yml. Shares that workflow's `data-write`
+# concurrency group so the two never race on a git push (Phase E step 16,
+# .github/context/subsystem3-close-and-mvp-site.md).
+
+on:
+  schedule:
+    # 04:30 UTC - after daily-snapshot.yml's 03:30 UTC run has usually
+    # finished, so predict sees today's rebuilt facts.
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-write
+  cancel-in-progress: false
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+
+      - name: Configure git
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      # Non-zero exit is the expected, common case (nothing in the horizon
+      # yet, or - today - the live-ingestion gap documented in
+      # .github/context/subsystem3-close-and-mvp-site.md step 8/13) so
+      # neither step aborts the job; `optimise` simply has nothing to do
+      # when `predict` wrote nothing.
+      - name: Predict
+        id: predict
+        continue-on-error: true
+        run: uv run fpl --verbose predict
+
+      - name: Optimise
+        id: optimise
+        if: steps.predict.outcome == 'success'
+        continue-on-error: true
+        run: uv run fpl --verbose optimise
+
+      - name: Commit predictions and recommendation
+        run: |
+          set -euo pipefail
+          git add data/predictions/
+          if git diff --cached --quiet; then
+            echo "Nothing new to commit."
+            exit 0
+          fi
+          git commit -m "data: predictions $(date -u +%Y-%m-%dT%H:%MZ)"
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
