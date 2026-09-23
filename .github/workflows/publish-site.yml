@@ -1,0 +1,65 @@
+name: Publish site
+
+# The Pages artifact is site/ plus data/predictions/ copied alongside it, so
+# app.js's same-origin fetch("data/predictions/latest.json") works without
+# CORS or cross-repo raw-content fetching. Triggered by either changing —
+# site/** for a code change, data/predictions/** because weekly-predict.yml
+# just committed a new recommendation (Phase E step 16,
+# .github/context/subsystem3-close-and-mvp-site.md).
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "site/**"
+      - "data/predictions/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# The standard actions/deploy-pages concurrency guard: only one deployment
+# in flight, and a newer one should still win rather than being cancelled
+# mid-upload.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the Pages bundle
+        run: |
+          set -euo pipefail
+          mkdir -p _site/data/predictions
+          cp -r site/. _site/
+          if [ -d data/predictions ]; then
+            cp -r data/predictions/. _site/data/predictions/
+          fi
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
