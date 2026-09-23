@@ -1,0 +1,301 @@
+{
+  "season": "2026-27",
+  "as_of": "2026-09-23T14:51:23Z",
+  "budget": 100.0,
+  "total_price": 98.9,
+  "total_predicted_points": 48.92375317114997,
+  "squad": [
+    {
+      "player_id": 12,
+      "name": "Saka",
+      "team_id": 1,
+      "team_name": "ARS",
+      "position": "MID",
+      "price": 9.5,
+      "predicted_points": 3.1731873061419877
+    },
+    {
+      "player_id": 28,
+      "name": "Martinez",
+      "team_id": 6,
+      "team_name": "CHE",
+      "position": "GK",
+      "price": 5.0,
+      "predicted_points": 3.2694670930300016
+    },
+    {
+      "player_id": 94,
+      "name": "Schade",
+      "team_id": 4,
+      "team_name": "BRE",
+      "position": "MID",
+      "price": 6.2,
+      "predicted_points": 3.5021621675267216
+    },
+    {
+      "player_id": 124,
+      "name": "Gro\u00df",
+      "team_id": 5,
+      "team_name": "BHA",
+      "position": "MID",
+      "price": 5.800000000000001,
+      "predicted_points": 3.4619232154220376
+    },
+    {
+      "player_id": 229,
+      "name": "Tarkowski",
+      "team_id": 9,
+      "team_name": "EVE",
+      "position": "DEF",
+      "price": 6.1000000000000005,
+      "predicted_points": 2.5857141565251527
+    },
+    {
+      "player_id": 249,
+      "name": "Barry",
+      "team_id": 9,
+      "team_name": "EVE",
+      "position": "FWD",
+      "price": 5.6000000000000005,
+      "predicted_points": 3.795585487233598
+    },
+    {
+      "player_id": 305,
+      "name": "Davis",
+      "team_id": 12,
+      "team_name": "IPS",
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.619149851729207
+    },
+    {
+      "player_id": 388,
+      "name": "Gu\u00e9hi",
+      "team_id": 15,
+      "team_name": "MCI",
+      "position": "DEF",
+      "price": 6.0,
+      "predicted_points": 2.547596376369766
+    },
+    {
+      "player_id": 397,
+      "name": "Semenyo",
+      "team_id": 15,
+      "team_name": "MCI",
+      "position": "MID",
+      "price": 8.4,
+      "predicted_points": 3.5193988563613647
+    },
+    {
+      "player_id": 411,
+      "name": "Haaland",
+      "team_id": 15,
+      "team_name": "MCI",
+      "position": "FWD",
+      "price": 15.600000000000001,
+      "predicted_points": 4.14597799317485
+    },
+    {
+      "player_id": 449,
+      "name": "Hall",
+      "team_id": 17,
+      "team_name": "NEW",
+      "position": "DEF",
+      "price": 5.300000000000001,
+      "predicted_points": 2.580640450480011
+    },
+    {
+      "player_id": 453,
+      "name": "Barnes",
+      "team_id": 17,
+      "team_name": "NEW",
+      "position": "MID",
+      "price": 6.1000000000000005,
+      "predicted_points": 3.378534692979393
+    },
+    {
+      "player_id": 469,
+      "name": "N.Williams",
+      "team_id": 18,
+      "team_name": "NFO",
+      "position": "DEF",
+      "price": 5.0,
+      "predicted_points": 2.528714301642013
+    },
+    {
+      "player_id": 552,
+      "name": "Brobbey",
+      "team_id": 20,
+      "team_name": "SUN",
+      "position": "FWD",
+      "price": 5.7,
+      "predicted_points": 3.8006717676096136
+    },
+    {
+      "player_id": 572,
+      "name": "Tzolakis",
+      "team_id": 11,
+      "team_name": "HUL",
+      "position": "GK",
+      "price": 4.6000000000000005,
+      "predicted_points": 4.015029454924251
+    }
+  ],
+  "starting_xi": [
+    {
+      "player_id": 572,
+      "name": "Tzolakis",
+      "team_id": 11,
+      "team_name": "HUL",
+      "position": "GK",
+      "price": 4.6000000000000005,
+      "predicted_points": 4.015029454924251
+    },
+    {
+      "player_id": 94,
+      "name": "Schade",
+      "team_id": 4,
+      "team_name": "BRE",
+      "position": "MID",
+      "price": 6.2,
+      "predicted_points": 3.5021621675267216
+    },
+    {
+      "player_id": 124,
+      "name": "Gro\u00df",
+      "team_id": 5,
+      "team_name": "BHA",
+      "position": "MID",
+      "price": 5.800000000000001,
+      "predicted_points": 3.4619232154220376
+    },
+    {
+      "player_id": 229,
+      "name": "Tarkowski",
+      "team_id": 9,
+      "team_name": "EVE",
+      "position": "DEF",
+      "price": 6.1000000000000005,
+      "predicted_points": 2.5857141565251527
+    },
+    {
+      "player_id": 249,
+      "name": "Barry",
+      "team_id": 9,
+      "team_name": "EVE",
+      "position": "FWD",
+      "price": 5.6000000000000005,
+      "predicted_points": 3.795585487233598
+    },
+    {
+      "player_id": 305,
+      "name": "Davis",
+      "team_id": 12,
+      "team_name": "IPS",
+      "position": "DEF",
+      "price": 4.0,
+      "predicted_points": 2.619149851729207
+    },
+    {
+      "player_id": 397,
+      "name": "Semenyo",
+      "team_id": 15,
+      "team_name": "MCI",
+      "position": "MID",
+      "price": 8.4,
+      "predicted_points": 3.5193988563613647
+    },
+    {
+      "player_id": 411,
+      "name": "Haaland",
+      "team_id": 15,
+      "team_name": "MCI",
+      "position": "FWD",
+      "price": 15.600000000000001,
+      "predicted_points": 4.14597799317485
+    },
+    {
+      "player_id": 449,
+      "name": "Hall",
+      "team_id": 17,
+      "team_name": "NEW",
+      "position": "DEF",
+      "price": 5.300000000000001,
+      "predicted_points": 2.580640450480011
+    },
+    {
+      "player_id": 453,
+      "name": "Barnes",
+      "team_id": 17,
+      "team_name": "NEW",
+      "position": "MID",
+      "price": 6.1000000000000005,
+      "predicted_points": 3.378534692979393
+    },
+    {
+      "player_id": 552,
+      "name": "Brobbey",
+      "team_id": 20,
+      "team_name": "SUN",
+      "position": "FWD",
+      "price": 5.7,
+      "predicted_points": 3.8006717676096136
+    }
+  ],
+  "bench": [
+    {
+      "player_id": 28,
+      "name": "Martinez",
+      "team_id": 6,
+      "team_name": "CHE",
+      "position": "GK",
+      "price": 5.0,
+      "predicted_points": 3.2694670930300016
+    },
+    {
+      "player_id": 12,
+      "name": "Saka",
+      "team_id": 1,
+      "team_name": "ARS",
+      "position": "MID",
+      "price": 9.5,
+      "predicted_points": 3.1731873061419877
+    },
+    {
+      "player_id": 388,
+      "name": "Gu\u00e9hi",
+      "team_id": 15,
+      "team_name": "MCI",
+      "position": "DEF",
+      "price": 6.0,
+      "predicted_points": 2.547596376369766
+    },
+    {
+      "player_id": 469,
+      "name": "N.Williams",
+      "team_id": 18,
+      "team_name": "NFO",
+      "position": "DEF",
+      "price": 5.0,
+      "predicted_points": 2.528714301642013
+    }
+  ],
+  "captain": {
+    "player_id": 411,
+    "name": "Haaland",
+    "team_id": 15,
+    "team_name": "MCI",
+    "position": "FWD",
+    "price": 15.600000000000001,
+    "predicted_points": 4.14597799317485
+  },
+  "vice_captain": {
+    "player_id": 572,
+    "name": "Tzolakis",
+    "team_id": 11,
+    "team_name": "HUL",
+    "position": "GK",
+    "price": 4.6000000000000005,
+    "predicted_points": 4.015029454924251
+  }
+}
