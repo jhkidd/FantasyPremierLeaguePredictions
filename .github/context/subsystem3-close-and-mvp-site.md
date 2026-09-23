@@ -193,6 +193,18 @@ and verify CI green (`gh run watch`) before the next step.
     `latest.json` pointing at a genuine `squad.json`. The next scheduled `weekly-predict.yml` run
     will be the first to confirm the new `workflow_run` trigger fires automatically end-to-end.
 
+18. Follow-up (2026-09-23): the site rendered players/teams as raw ids (`Player #572 · Team 11`)
+    since neither name was in the `squad.json` artefact, tracked as a follow-up in `app.js`'s
+    original comment. Closed by enriching `squad.json` at `fpl optimise` time — the CLI now reads
+    the season's already-staged `players`/`teams` tables (`web_name`/`short_name`, the same short
+    display names the real FPL app uses) and joins them onto each player entry as `name`/
+    `team_name`, via two new helpers in `cli.py` (`_name_lookups`, extended `_player_payload`). The
+    optimiser core (`SquadPlayer`, `pick_squad`, `pick_starting_xi`) is untouched — this is purely
+    a display concern at the CLI/payload layer. Missing staged tables fall back to an id-based
+    label (`Player #{id}`/`Team {id}`) rather than failing, so every existing test/partition still
+    works unmodified. `site/app.js`'s `playerLabel()` now renders `"Salah (LIV)"` instead of the
+    id pair.
+
 ### Explicitly out of scope for this task (carried forward)
 
 Tuning (§3.3), the full walk-forward backtest harness (§3.4), transfers/chip-timing strategy, a

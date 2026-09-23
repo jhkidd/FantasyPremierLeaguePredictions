@@ -19,10 +19,7 @@ async function fetchJson(path) {
 }
 
 function playerLabel(player) {
-  // No player/team names are in this artefact yet (Phase D/E MVP scope,
-  // .github/context/subsystem3-close-and-mvp-site.md Q&A) - identifying a
-  // player by name is a follow-up enrichment, tracked there.
-  return `Player #${player.player_id} · Team ${player.team_id}`;
+  return `${player.name} (${player.team_name})`;
 }
 
 function renderPlayerRow(player, { captain, viceCaptain }) {

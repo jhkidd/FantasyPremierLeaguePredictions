@@ -1437,10 +1437,44 @@ def predict(
     typer.echo(f"predict: {predictions.height} row(s) written to {out_dir / 'part.parquet'}")
 
 
-def _player_payload(player: SquadPlayer) -> dict:
+def _name_lookups(season: Season, data_root: Path | None) -> tuple[dict[int, str], dict[int, str]]:
+    """``{player_id: web_name}`` and ``{team_id: short_name}``, read from the
+    season's already-staged ``players``/``teams`` tables — the same short
+    display names the real FPL app itself uses (e.g. ``"Salah"``, ``"LIV"``),
+    not the full first+second name.
+
+    Either table can be absent (an older/synthetic predictions partition
+    whose season was never staged, e.g. in tests) — an empty lookup in that
+    case, not a failure; ``_player_payload`` falls back to an id-based label
+    exactly matching the pre-enrichment behaviour."""
+    players_path = paths.staged_table("players", season, data_root=data_root) / "part.parquet"
+    teams_path = paths.staged_table("teams", season, data_root=data_root) / "part.parquet"
+
+    player_names: dict[int, str] = {}
+    if players_path.exists():
+        players = read_parquet(players_path)
+        player_names = dict(
+            zip(players["player_id"].to_list(), players["web_name"].to_list(), strict=True)
+        )
+
+    team_names: dict[int, str] = {}
+    if teams_path.exists():
+        teams = read_parquet(teams_path)
+        team_names = dict(
+            zip(teams["team_id"].to_list(), teams["short_name"].to_list(), strict=True)
+        )
+
+    return player_names, team_names
+
+
+def _player_payload(
+    player: SquadPlayer, player_names: dict[int, str], team_names: dict[int, str]
+) -> dict:
     return {
         "player_id": player.player_id,
+        "name": player_names.get(player.player_id, f"Player #{player.player_id}"),
         "team_id": player.team_id,
+        "team_name": team_names.get(player.team_id, f"Team {player.team_id}"),
         "position": player.position,
         "price": player.price,
         "predicted_points": player.predicted_points,
@@ -1500,17 +1534,22 @@ def optimise(
         typer.secho(f"optimise: {exc}", err=True, fg=typer.colors.RED)
         raise typer.Exit(exit_codes.FAILURE) from exc
 
+    player_names, team_names = _name_lookups(parsed_season, data_root)
+
+    def _payload(player: SquadPlayer) -> dict:
+        return _player_payload(player, player_names, team_names)
+
     payload = {
         "season": str(parsed_season),
         "as_of": moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "budget": budget,
         "total_price": squad.total_price,
         "total_predicted_points": squad.total_predicted_points,
-        "squad": [_player_payload(player) for player in squad.players],
-        "starting_xi": [_player_payload(player) for player in xi.starting_xi],
-        "bench": [_player_payload(player) for player in xi.bench],
-        "captain": _player_payload(xi.captain),
-        "vice_captain": _player_payload(xi.vice_captain),
+        "squad": [_payload(player) for player in squad.players],
+        "starting_xi": [_payload(player) for player in xi.starting_xi],
+        "bench": [_payload(player) for player in xi.bench],
+        "captain": _payload(xi.captain),
+        "vice_captain": _payload(xi.vice_captain),
     }
     out_path = partition / "squad.json"
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

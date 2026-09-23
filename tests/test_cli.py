@@ -1589,7 +1589,91 @@ class TestOptimiseCommand:
         assert payload["total_price"] == pytest.approx(15 * 4.0)
         assert "captain" in payload and "vice_captain" in payload
 
-    def test_writes_a_latest_pointer_the_site_can_fetch(self, isolated_data_root: Path) -> None:
+    def _write_players_and_teams(
+        self, data_root: Path, season: Season, *, names: dict[int, str], teams: dict[int, str]
+    ) -> None:
+        import polars as pl
+
+        from fpl.storage import paths
+        from fpl.storage.parquet_io import write_parquet
+
+        players_dir = paths.staged_table("players", season, data_root=data_root)
+        players_dir.mkdir(parents=True, exist_ok=True)
+        write_parquet(
+            pl.DataFrame({"player_id": list(names.keys()), "web_name": list(names.values())}),
+            players_dir / "part.parquet",
+        )
+
+        teams_dir = paths.staged_table("teams", season, data_root=data_root)
+        teams_dir.mkdir(parents=True, exist_ok=True)
+        write_parquet(
+            pl.DataFrame({"team_id": list(teams.keys()), "short_name": list(teams.values())}),
+            teams_dir / "part.parquet",
+        )
+
+    def test_squad_json_carries_player_and_team_names(self, isolated_data_root: Path) -> None:
+        season = Season(2025)
+        moment = datetime(2025, 8, 20, tzinfo=UTC)
+        partition = self._write_predictions(
+            isolated_data_root, season, moment, self._valid_squad_rows()
+        )
+        # _valid_squad_rows() puts one player per team, team_id == player_id.
+        self._write_players_and_teams(
+            isolated_data_root,
+            season,
+            names={team: f"Player{team}" for team in range(1, 16)},
+            teams={team: f"TM{team}" for team in range(1, 16)},
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "optimise",
+                "--season",
+                "2025-26",
+                "--as-of",
+                "2025-08-20T00:00:00Z",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        payload = json.loads((partition / "squad.json").read_text(encoding="utf-8"))
+        for player in payload["squad"]:
+            assert player["name"] == f"Player{player['player_id']}"
+            assert player["team_name"] == f"TM{player['team_id']}"
+
+    def test_falls_back_to_an_id_based_label_when_names_are_unstaged(
+        self, isolated_data_root: Path
+    ) -> None:
+        """No `players`/`teams` table on disk at all (e.g. a season that was
+        never staged) must still produce a valid, non-crashing payload."""
+        season = Season(2025)
+        moment = datetime(2025, 8, 20, tzinfo=UTC)
+        partition = self._write_predictions(
+            isolated_data_root, season, moment, self._valid_squad_rows()
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "--data-root",
+                str(isolated_data_root),
+                "optimise",
+                "--season",
+                "2025-26",
+                "--as-of",
+                "2025-08-20T00:00:00Z",
+            ],
+        )
+
+        assert result.exit_code == exit_codes.SUCCESS, result.output
+        payload = json.loads((partition / "squad.json").read_text(encoding="utf-8"))
+        player = payload["squad"][0]
+        assert player["name"] == f"Player #{player['player_id']}"
+        assert player["team_name"] == f"Team {player['team_id']}"
+
         from fpl.storage import paths
 
         season = Season(2025)
