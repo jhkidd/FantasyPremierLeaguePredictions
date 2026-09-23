@@ -470,6 +470,8 @@ def stage_event_live(
     *,
     players: pl.DataFrame,
     fixtures: pl.DataFrame,
+    team_by_player: pl.DataFrame | None = None,
+    match_side_team: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, StagingReport]:
     """Stage one gameweek's ``event/{event}/live/`` capture into
     ``player_fixture_stats`` rows for the current, in-progress season.
@@ -483,6 +485,39 @@ def stage_event_live(
     ``position``, not a failure — mirrors ``_with_team_codes``'s "absent
     input -> null, log, don't fail" convention; the caller is expected to log
     that condition itself, since it has the season/table context to say so).
+
+    Team resolution tries three sources, most authoritative first:
+
+    1. ``match_side_team`` (``fixture_id``, ``player_id``, ``team_id``) — who
+       the fixture's *own* per-match stat breakdown (goals/bps/etc credited
+       to a specific side) says played for which team. This is ground truth
+       for anyone with any recorded involvement, and is immune to the lag
+       between a real-world transfer and bootstrap-static's `team` field
+       catching up (a real, observed case — close-live-ingestion-gap.md).
+    2. ``team_by_player`` (``player_id``, ``team_id``) — who was on which
+       team *as of this gameweek's deadline*, reconstructed by the pipeline
+       layer from an earlier bootstrap-static capture. Covers players with
+       zero recorded involvement that gameweek (an unused substitute has no
+       stat entry anywhere to look up), for whom (1) has nothing to offer.
+    3. ``players.team_id`` — a player's *current* team: the last-resort
+       fallback whenever (1) and (2) both have nothing (typically a
+       mid-season signing's zero-record placeholder row for a gameweek
+       before they'd even joined the league, for whom no historical
+       snapshot can possibly have an entry).
+
+    Each candidate is validated against the fixture's own two sides before
+    being accepted — taken in priority order, but a candidate that matches
+    neither ``team_h`` nor ``team_a`` is treated as unresolved and skipped
+    to the next source, rather than shadowing a better answer further down
+    the list. This matters because a source can have a non-null answer that
+    is simply stale (e.g. a snapshot capture that itself lags a real
+    transfer by a day or two) — "has some value" alone is not enough to
+    trust it.
+
+    Bootstrap-static only ever exposes a player's *current* team, so once a
+    player has since moved clubs, source 3 alone would misattribute a past
+    gameweek's fixture to their new club (or to neither side, if the new
+    club wasn't even playing that fixture) — hence sources (1) and (2).
 
     A player with more than one fixture this gameweek (a "double gameweek")
     is skipped and counted in the report's ``excluded`` dict: ``event_live``'s
@@ -521,15 +556,56 @@ def stage_event_live(
 
     raw = pl.DataFrame(rows).with_columns(pl.lit(event).alias("event"))
 
-    player_lookup = (
-        players.select("player_id", "code", "team_id", "element_type")
+    identity_lookup = (
+        players.select("player_id", "code", "element_type")
         .with_columns(pl.col("code").cast(pl.Utf8).alias("player_code"))
         .drop("code")
     )
-    raw = raw.join(player_lookup, on="player_id", how="left")
+    raw = raw.join(identity_lookup, on="player_id", how="left")
+
+    # Three sources, validated against the fixture's actual two sides and
+    # taken in priority order — never a single blanket choice of source
+    # (see the priority list in the docstring above). Validating matters as
+    # well as ordering: a source can have a non-null answer that's simply
+    # stale (e.g. a snapshot capture that itself lags a real transfer by a
+    # day or two), and a stale answer must not shadow a better one further
+    # down the list — only "not even one of the two sides" counts as
+    # genuinely unresolved.
+    current_team_lookup = players.select("player_id", pl.col("team_id").alias("team_id_current"))
+    raw = raw.join(current_team_lookup, on="player_id", how="left")
+
+    if team_by_player is not None:
+        snapshot_lookup = team_by_player.select(
+            "player_id", pl.col("team_id").alias("team_id_snapshot")
+        )
+        raw = raw.join(snapshot_lookup, on="player_id", how="left")
+    else:
+        raw = raw.with_columns(pl.lit(None, dtype=pl.Int64).alias("team_id_snapshot"))
+
+    if match_side_team is not None:
+        match_lookup = match_side_team.select(
+            "fixture_id", "player_id", pl.col("team_id").alias("team_id_match")
+        )
+        raw = raw.join(match_lookup, on=["fixture_id", "player_id"], how="left")
+    else:
+        raw = raw.with_columns(pl.lit(None, dtype=pl.Int64).alias("team_id_match"))
 
     fixture_lookup = fixtures.select("fixture_id", "team_h", "team_a", "kickoff_time")
     raw = raw.join(fixture_lookup, on="fixture_id", how="left")
+
+    def _on_a_side(column: str) -> pl.Expr:
+        return (pl.col(column) == pl.col("team_h")) | (pl.col(column) == pl.col("team_a"))
+
+    raw = raw.with_columns(
+        pl.when(_on_a_side("team_id_match"))
+        .then(pl.col("team_id_match"))
+        .when(_on_a_side("team_id_snapshot"))
+        .then(pl.col("team_id_snapshot"))
+        .when(_on_a_side("team_id_current"))
+        .then(pl.col("team_id_current"))
+        .otherwise(None)
+        .alias("team_id")
+    ).drop(["team_id_match", "team_id_snapshot", "team_id_current"])
 
     raw = raw.with_columns(
         pl.when(pl.col("team_id") == pl.col("team_h"))

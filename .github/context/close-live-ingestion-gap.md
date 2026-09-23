@@ -94,6 +94,52 @@ existing pipeline already does for 5+ seasons of history.
    `fpl predict && fpl optimise` run produces a genuinely non-null
    recommendation, and the deployed site shows it.
 
+## Team-id resolution bug (found during real-data verification)
+
+Step 6's real workflow run (`gh workflow run daily-snapshot.yml`) surfaced a
+genuine correctness bug that no unit test with synthetic fixtures had caught:
+`Check facts` failed with `not_null(team_id): 25 null value(s)`.
+
+**Root cause:** `stage_event_live()`'s original design joined every stats row
+to the *current* `players.team_id` to derive `was_home`/`opponent_team`.
+Bootstrap-static's `elements[].team` field only ever reflects a player's
+*current* club — for anyone who has since transferred, that misattributes a
+past gameweek's fixture to their new club (or to neither side, if the new
+club wasn't even playing that fixture). Confirmed concretely against real
+2026-27 data: several players' current team didn't match either side of
+fixtures they had genuinely played in under their old club. A "pick the
+nearest-preceding daily `bootstrap_static` snapshot" fix alone wasn't fully
+reliable either — bootstrap-static itself can lag a few days behind a
+real-world transfer at any given capture instant.
+
+**Fix — a validated 3-source waterfall**, most authoritative first, each
+candidate accepted only if it actually equals the fixture's `team_h` or
+`team_a` (a non-null-but-stale value must not shadow a better source further
+down the list):
+
+1. `match_side_team` — `{(fixture_id, player_id): team_id}` built directly
+   from the fixture's own per-match `stats` breakdown (h/a element lists).
+   Ground truth for anyone with recorded involvement; immune to
+   bootstrap-static lag since it's real match-event data, not a roster
+   snapshot.
+2. `team_by_player` — `{player_id: team_id}` reconstructed from the nearest
+   `bootstrap_static` daily capture at-or-before the gameweek's deadline
+   (falling back to the earliest capture on disk for gameweek 1). Covers
+   zero-involvement players (unused substitutes) absent from source 1.
+3. `players.team_id` (current club) — last-resort fallback, mainly exercised
+   by a mid-season signing's zero-stat placeholder rows for gameweeks before
+   they'd even joined the league (no historical snapshot can possibly have
+   an entry for them).
+
+Implemented as two new pipeline helpers, `_match_side_team()` and
+`_team_snapshot_for_event()` (`src/fpl/staging/pipeline.py`), feeding two new
+optional parameters on `stage_event_live()` (`src/fpl/staging/fpl_api.py`).
+Re-running against the real pulled 2026-27 data after this fix: zero null
+`team_id`/`opponent_team` rows, `check --layer facts` clean, and
+`fpl predict` produces 667 rows with a fully non-null
+`predicted_total_points_fpl` column — the original goal (real, non-null
+recommendations for the in-progress season) confirmed working end-to-end.
+
 ## Explicitly out of scope
 
 - Retraining or changing the feature set — the diagnostic shows no design

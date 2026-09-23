@@ -267,3 +267,106 @@ class TestStageEventLive:
         body = self._body([self._element(10, [100], minutes=90)])
         _, report = stage_event_live(body, SEASON, 1, players=players, fixtures=fixtures)
         assert not report.unknown_columns
+
+
+class TestStageEventLiveTeamResolution:
+    """A player's ``team`` in bootstrap-static only ever reflects their
+    *current* club, so it misattributes a past gameweek's fixture once
+    they've since transferred (close-live-ingestion-gap.md). These cases
+    cover the 3-source validated waterfall added to resolve that."""
+
+    # Fixture 200 is team 2 (home) vs team 3 (away); every case below has a
+    # player whose *current* club (in ``players``) is team 1 — a club not
+    # even playing this fixture — so a correct result can only come from
+    # ``match_side_team`` or ``team_by_player``, never from source 3 alone.
+    @pytest.fixture
+    def players(self) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                "player_id": [10, 20, 30, 40],
+                "code": [1001, 1002, 1003, 1004],
+                "team_id": [1, 1, 2, 3],
+                "element_type": [1, 1, 1, 1],
+            }
+        )
+
+    @pytest.fixture
+    def fixtures(self) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                "fixture_id": [200],
+                "team_h": [2],
+                "team_a": [3],
+                "kickoff_time": ["2026-08-21T19:00:00Z"],
+            }
+        )
+
+    @staticmethod
+    def _element(player_id: int, minutes: int = 90) -> dict:
+        return TestStageEventLive._element(player_id, [200], minutes=minutes)
+
+    def _body(self, elements: list[dict]) -> bytes:
+        return json.dumps({"elements": elements}).encode()
+
+    def test_match_side_team_wins_over_a_stale_current_team(self, players, fixtures):
+        """Player 10's ``players.team_id`` (1) isn't in this fixture at all —
+        a transfer since the last bootstrap-static capture. The fixture's own
+        per-match stat breakdown says they played for team 2 (home)."""
+        body = self._body([self._element(10)])
+        match_side_team = pl.DataFrame({"fixture_id": [200], "player_id": [10], "team_id": [2]})
+        staged, _ = stage_event_live(
+            body, SEASON, 1, players=players, fixtures=fixtures, match_side_team=match_side_team
+        )
+        row = staged.row(0, named=True)
+        assert row["was_home"] is True
+        assert row["opponent_team"] == 3
+
+    def test_historical_snapshot_resolves_a_zero_involvement_substitute(self, players, fixtures):
+        """Player 20 has zero minutes, so they never appear in the fixture's
+        own per-match stat breakdown — only a historical bootstrap-static
+        snapshot (as of this gameweek's deadline) can place them."""
+        body = self._body([self._element(20, minutes=0)])
+        team_by_player = pl.DataFrame({"player_id": [20], "team_id": [3]})
+        staged, _ = stage_event_live(
+            body, SEASON, 1, players=players, fixtures=fixtures, team_by_player=team_by_player
+        )
+        row = staged.row(0, named=True)
+        assert row["was_home"] is False
+        assert row["opponent_team"] == 2
+
+    def test_current_team_is_the_last_resort_for_a_brand_new_signing(self, players, fixtures):
+        """Player 30 is a mid-season signing absent from every historical
+        snapshot (they hadn't joined the league yet) and from this fixture's
+        stat breakdown (an unused substitute) — only their current team
+        (2, which matches team_h here) can resolve them."""
+        body = self._body([self._element(30, minutes=0)])
+        staged, _ = stage_event_live(body, SEASON, 1, players=players, fixtures=fixtures)
+        row = staged.row(0, named=True)
+        assert row["was_home"] is True
+        assert row["opponent_team"] == 3
+
+    def test_a_stale_snapshot_does_not_shadow_a_valid_current_team(self, players, fixtures):
+        """Player 40's historical snapshot (team 99) is itself wrong/lagging
+        and matches neither side of the fixture — it must not block the
+        fallback to their current team (3, team_a here), which does."""
+        team_by_player = pl.DataFrame({"player_id": [40], "team_id": [99]})
+        body = self._body([self._element(40, minutes=0)])
+        staged, _ = stage_event_live(
+            body, SEASON, 1, players=players, fixtures=fixtures, team_by_player=team_by_player
+        )
+        row = staged.row(0, named=True)
+        assert row["was_home"] is False
+        assert row["opponent_team"] == 2
+
+    def test_an_unresolvable_player_gets_null_rather_than_a_wrong_guess(self, players, fixtures):
+        """Player 20's current team (1) and a snapshot both point at a club
+        that isn't even in this fixture — with no ``match_side_team`` entry
+        either (zero involvement), null is the honest outcome, not a guess."""
+        team_by_player = pl.DataFrame({"player_id": [20], "team_id": [99]})
+        body = self._body([self._element(20, minutes=0)])
+        staged, _ = stage_event_live(
+            body, SEASON, 1, players=players, fixtures=fixtures, team_by_player=team_by_player
+        )
+        row = staged.row(0, named=True)
+        assert row["was_home"] is None
+        assert row["opponent_team"] is None

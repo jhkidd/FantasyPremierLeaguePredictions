@@ -232,6 +232,79 @@ def _stage_manager_picks(
     return results
 
 
+def _match_side_team(season: Season, data_root: Path | None) -> pl.DataFrame | None:
+    """``{(fixture_id, player_id): team_id}`` from the fixture's own per-match
+    stat breakdown (goals/bps/etc credited to a home or away element list).
+
+    This is ground truth for anyone with any recorded involvement in a match
+    — unlike a bootstrap-static roster snapshot, it can't lag a real-world
+    transfer, since it's the actual match event data (a real, observed case:
+    a goalkeeper had already left his bootstrap-static-listed club for
+    another by the time his old club's next fixture was played — the
+    fixture's own stats still correctly credited him to the club he actually
+    played for). Returns ``None`` if there's no fixtures capture on disk;
+    the caller falls back further from there.
+    """
+    partition = paths.latest_partition("fpl", "fixtures", season, data_root=data_root)
+    if partition is None:
+        return None
+    body, _meta = read_raw(partition)
+    rows: list[dict[str, int]] = []
+    for fixture in json.loads(body):
+        fixture_id, team_h, team_a = fixture.get("id"), fixture.get("team_h"), fixture.get("team_a")
+        if fixture_id is None or team_h is None or team_a is None:
+            continue
+        for stat in fixture.get("stats") or []:
+            for entry in stat.get("h") or []:
+                rows.append(
+                    {"fixture_id": fixture_id, "player_id": entry["element"], "team_id": team_h}
+                )
+            for entry in stat.get("a") or []:
+                rows.append(
+                    {"fixture_id": fixture_id, "player_id": entry["element"], "team_id": team_a}
+                )
+    if not rows:
+        return None
+    return pl.DataFrame(rows).unique(subset=["fixture_id", "player_id"])
+
+
+def _team_snapshot_for_event(
+    deadline_time: str | None, partitions: list[Path]
+) -> pl.DataFrame | None:
+    """Reconstruct ``{player_id: team_id}`` as of one gameweek's deadline.
+
+    Bootstrap-static only ever exposes a player's *current* team, so once a
+    player has since transferred, joining a past gameweek's stats to that
+    table would misattribute the fixture to their new club (or to neither
+    side, if the new club wasn't even involved) — close-live-ingestion-gap.md.
+    Daily snapshots are captured well before deadlines, so the last capture
+    at or before this gameweek's deadline reflects the squads that actually
+    played. Falls back to the earliest capture on disk if none precede the
+    deadline (e.g. gameweek 1, captured pre-season), and to ``None`` (caller
+    falls back to the current ``players`` table) if there are no captures or
+    no deadline to compare against at all.
+
+    This is only ever a fallback for players with zero recorded involvement
+    that gameweek — ``_match_side_team``'s per-match breakdown is preferred
+    whenever it has an answer, since a roster snapshot can itself lag a real
+    transfer by a few days.
+    """
+    if not partitions or deadline_time is None:
+        return None
+    deadline = datetime.fromisoformat(deadline_time.replace("Z", "+00:00"))
+    preceding = [p for p in partitions if partition_as_of(p) <= deadline]
+    chosen = preceding[-1] if preceding else partitions[0]
+    body, _meta = read_raw(chosen)
+    elements = json.loads(body).get("elements", [])
+    return pl.DataFrame(
+        {
+            "player_id": [e["id"] for e in elements],
+            "team_id": [e.get("team") for e in elements],
+        },
+        schema={"player_id": pl.Int64, "team_id": pl.Int64},
+    )
+
+
 def _stage_event_live(
     season: Season, data_root: Path | None, tables: set[str] | None
 ) -> list[StageResult]:
@@ -270,6 +343,22 @@ def _stage_event_live(
     players = read_parquet(players_path)
     fixtures_table = read_parquet(fixtures_path)
 
+    events_path = paths.staged_table("events", season, data_root=data_root) / "part.parquet"
+    deadlines: dict[int, str] = {}
+    if events_path.exists():
+        events_table = read_parquet(events_path)
+        deadlines = dict(
+            zip(
+                events_table["event"].to_list(),
+                events_table["deadline_time"].to_list(),
+                strict=True,
+            )
+        )
+    bootstrap_partitions = list(
+        paths.iter_as_of_partitions("fpl", "bootstrap_static", season, data_root=data_root)
+    )
+    match_side_team = _match_side_team(season, data_root)
+
     frames: list[pl.DataFrame] = []
     last_report: StagingReport | None = None
     for event_dir in event_dirs:
@@ -280,8 +369,15 @@ def _stage_event_live(
         if partition is None:
             continue
         body, _meta = read_raw(partition)
+        team_snapshot = _team_snapshot_for_event(deadlines.get(event), bootstrap_partitions)
         staged, report = stage_event_live(
-            body, season, event, players=players, fixtures=fixtures_table
+            body,
+            season,
+            event,
+            players=players,
+            fixtures=fixtures_table,
+            team_by_player=team_snapshot,
+            match_side_team=match_side_team,
         )
         last_report = report
         if staged.height:

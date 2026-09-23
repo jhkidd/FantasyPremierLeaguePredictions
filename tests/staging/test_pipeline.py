@@ -9,6 +9,8 @@ from fpl.facts.player_fixture import build_player_fixture_facts
 from fpl.quality.checks import check_staged_tables
 from fpl.quality.gates import has_blocking_violations
 from fpl.staging.pipeline import (
+    _match_side_team,
+    _team_snapshot_for_event,
     stage_clubelo_source,
     stage_footballdata_source,
     stage_fpl_source,
@@ -16,6 +18,7 @@ from fpl.staging.pipeline import (
     stage_understat_source,
     stage_vaastav_source,
 )
+from fpl.storage import paths
 from fpl.storage.raw_io import RawArtifact, write_raw
 
 SEASON = Season(2026)
@@ -515,7 +518,130 @@ class TestStageEventLivePipelineEndToEnd:
         assert "not staged" in result.detail
 
 
-class TestStageVaastavSourceEndToEnd:
+class TestMatchSideTeamAndTeamSnapshotHelpers:
+    """Unit-level coverage for the two team-resolution sources
+    ``_stage_event_live`` builds and passes into ``stage_event_live``
+    (close-live-ingestion-gap.md) — exercised in isolation here since the
+    end-to-end pipeline test fixtures only cover a single, untransferred
+    snapshot."""
+
+    def test_match_side_team_attributes_h_and_a_stat_entries_to_their_side(
+        self, tmp_path: Path
+    ) -> None:
+        data_root = tmp_path / "data"
+        fixtures_body = json.dumps(
+            [
+                {
+                    "id": 1,
+                    "team_h": 2,
+                    "team_a": 3,
+                    "stats": [
+                        {
+                            "identifier": "goals_scored",
+                            "h": [{"element": 10, "value": 1}],
+                            "a": [{"element": 20, "value": 1}],
+                        }
+                    ],
+                }
+            ]
+        ).encode()
+        write_raw(
+            RawArtifact(
+                source="fpl",
+                endpoint="fixtures",
+                season=SEASON,
+                url="https://fantasy.premierleague.com/api/fixtures/",
+                http_status=200,
+                body=fixtures_body,
+                fetched_at=datetime(2026, 8, 1, tzinfo=UTC),
+                connector_version="1",
+            ),
+            data_root=data_root,
+        )
+
+        result = _match_side_team(SEASON, data_root)
+
+        assert result is not None
+        by_player = {row["player_id"]: row["team_id"] for row in result.iter_rows(named=True)}
+        assert by_player[10] == 2
+        assert by_player[20] == 3
+
+    def test_match_side_team_is_none_without_a_fixtures_capture(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        assert _match_side_team(SEASON, data_root) is None
+
+    def test_team_snapshot_picks_the_last_capture_at_or_before_the_deadline(
+        self, tmp_path: Path
+    ) -> None:
+        data_root = tmp_path / "data"
+
+        def _write_bootstrap_snapshot(moment: datetime, team: int) -> None:
+            body = json.dumps({"elements": [{"id": 10, "team": team}]}).encode()
+            write_raw(
+                RawArtifact(
+                    source="fpl",
+                    endpoint="bootstrap_static",
+                    season=SEASON,
+                    url="https://fantasy.premierleague.com/api/bootstrap-static/",
+                    http_status=200,
+                    body=body,
+                    fetched_at=moment,
+                    connector_version="1",
+                ),
+                data_root=data_root,
+            )
+
+        # Player 10 transfers from team 1 to team 2 between these captures.
+        _write_bootstrap_snapshot(datetime(2026, 8, 1, tzinfo=UTC), 1)
+        _write_bootstrap_snapshot(datetime(2026, 8, 10, tzinfo=UTC), 2)
+        partitions = list(
+            paths.iter_as_of_partitions("fpl", "bootstrap_static", SEASON, data_root=data_root)
+        )
+
+        # A deadline between the two captures should resolve to the earlier
+        # (pre-transfer) team, not the current one.
+        before_transfer = _team_snapshot_for_event("2026-08-05T11:30:00Z", partitions)
+        assert before_transfer is not None
+        assert before_transfer.row(0, named=True)["team_id"] == 1
+
+        after_transfer = _team_snapshot_for_event("2026-08-15T11:30:00Z", partitions)
+        assert after_transfer is not None
+        assert after_transfer.row(0, named=True)["team_id"] == 2
+
+    def test_team_snapshot_falls_back_to_the_earliest_capture_for_gameweek_one(
+        self, tmp_path: Path
+    ) -> None:
+        """A deadline before every capture on disk (e.g. gameweek 1, whose
+        deadline is pre-season) still gets an answer from whatever was
+        captured first, rather than nothing at all."""
+        data_root = tmp_path / "data"
+        body = json.dumps({"elements": [{"id": 10, "team": 4}]}).encode()
+        write_raw(
+            RawArtifact(
+                source="fpl",
+                endpoint="bootstrap_static",
+                season=SEASON,
+                url="https://fantasy.premierleague.com/api/bootstrap-static/",
+                http_status=200,
+                body=body,
+                fetched_at=datetime(2026, 8, 10, tzinfo=UTC),
+                connector_version="1",
+            ),
+            data_root=data_root,
+        )
+        partitions = list(
+            paths.iter_as_of_partitions("fpl", "bootstrap_static", SEASON, data_root=data_root)
+        )
+
+        result = _team_snapshot_for_event("2026-07-01T11:30:00Z", partitions)
+
+        assert result is not None
+        assert result.row(0, named=True)["team_id"] == 4
+
+    def test_team_snapshot_is_none_without_captures_or_a_deadline(self, tmp_path: Path) -> None:
+        assert _team_snapshot_for_event(None, []) is None
+        assert _team_snapshot_for_event("2026-08-05T11:30:00Z", []) is None
+
     def test_stages_player_fixture_stats_excluding_manager_rows(self, tmp_path: Path) -> None:
         data_root = tmp_path / "data"
         _write_merged_gw(data_root, datetime(2026, 7, 31, tzinfo=UTC))
