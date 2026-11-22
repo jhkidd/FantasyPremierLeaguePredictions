@@ -1,0 +1,16 @@
+{
+  "cohort": null,
+  "compressed_bytes": 173980,
+  "connector_version": "1",
+  "content_type": "json",
+  "endpoint": "bootstrap_static",
+  "event": null,
+  "fetched_at": "2026-11-22T03:34:12.705759+00:00",
+  "http_status": 200,
+  "params": {},
+  "raw_bytes": 1803002,
+  "season": "2026-27",
+  "sha256": "1bd30825e94406250e657d5ec851b3c0ce52553c9449aa83fb9bef88c5161970",
+  "source": "fpl",
+  "url": "https://fantasy.premierleague.com/api/bootstrap-static/"
+}
