@@ -1,0 +1,301 @@
+{
+  "season": "2026-27",
+  "as_of": "2026-11-22T04:33:22Z",
+  "budget": 100.0,
+  "total_price": 96.8,
+  "total_predicted_points": 46.60721161056818,
+  "squad": [
+    {
+      "player_id": 93,
+      "name": "Schuster",
+      "team_id": 4,
+      "team_name": "BRE",
+      "position": "DEF",
+      "price": 4.5,
+      "predicted_points": 2.5108816499232356
+    },
+    {
+      "player_id": 94,
+      "name": "Schade",
+      "team_id": 4,
+      "team_name": "BRE",
+      "position": "MID",
+      "price": 6.2,
+      "predicted_points": 3.5283735163632595
+    },
+    {
+      "player_id": 124,
+      "name": "Gro\u00df",
+      "team_id": 5,
+      "team_name": "BHA",
+      "position": "MID",
+      "price": 5.9,
+      "predicted_points": 3.5062381529832303
+    },
+    {
+      "player_id": 138,
+      "name": "Kostoulas",
+      "team_id": 5,
+      "team_name": "BHA",
+      "position": "FWD",
+      "price": 5.6000000000000005,
+      "predicted_points": 3.6676988089297726
+    },
+    {
+      "player_id": 229,
+      "name": "Tarkowski",
+      "team_id": 9,
+      "team_name": "EVE",
+      "position": "DEF",
+      "price": 6.2,
+      "predicted_points": 2.5517845211108305
+    },
+    {
+      "player_id": 230,
+      "name": "Branthwaite",
+      "team_id": 9,
+      "team_name": "EVE",
+      "position": "DEF",
+      "price": 5.5,
+      "predicted_points": 2.4742295364491147
+    },
+    {
+      "player_id": 249,
+      "name": "Barry",
+      "team_id": 9,
+      "team_name": "EVE",
+      "position": "FWD",
+      "price": 5.7,
+      "predicted_points": 3.627878232144459
+    },
+    {
+      "player_id": 356,
+      "name": "Virgil",
+      "team_id": 14,
+      "team_name": "LIV",
+      "position": "DEF",
+      "price": 6.5,
+      "predicted_points": 2.2913012831908826
+    },
+    {
+      "player_id": 367,
+      "name": "Gakpo",
+      "team_id": 14,
+      "team_name": "LIV",
+      "position": "MID",
+      "price": 7.2,
+      "predicted_points": 2.9866429134943298
+    },
+    {
+      "player_id": 379,
+      "name": "Isak",
+      "team_id": 14,
+      "team_name": "LIV",
+      "position": "FWD",
+      "price": 9.1,
+      "predicted_points": 3.476022430567023
+    },
+    {
+      "player_id": 412,
+      "name": "Lammens",
+      "team_id": 16,
+      "team_name": "MUN",
+      "position": "GK",
+      "price": 4.9,
+      "predicted_points": 3.249292496757992
+    },
+    {
+      "player_id": 426,
+      "name": "B.Fernandes",
+      "team_id": 16,
+      "team_name": "MUN",
+      "position": "MID",
+      "price": 11.9,
+      "predicted_points": 3.172442387580961
+    },
+    {
+      "player_id": 428,
+      "name": "Cunha",
+      "team_id": 16,
+      "team_name": "MUN",
+      "position": "MID",
+      "price": 7.9,
+      "predicted_points": 3.044838197547192
+    },
+    {
+      "player_id": 504,
+      "name": "Vuskovic",
+      "team_id": 5,
+      "team_name": "BHA",
+      "position": "DEF",
+      "price": 5.0,
+      "predicted_points": 2.5086242344947984
+    },
+    {
+      "player_id": 572,
+      "name": "Tzolakis",
+      "team_id": 11,
+      "team_name": "HUL",
+      "position": "GK",
+      "price": 4.7,
+      "predicted_points": 4.0109632490311
+    }
+  ],
+  "starting_xi": [
+    {
+      "player_id": 572,
+      "name": "Tzolakis",
+      "team_id": 11,
+      "team_name": "HUL",
+      "position": "GK",
+      "price": 4.7,
+      "predicted_points": 4.0109632490311
+    },
+    {
+      "player_id": 93,
+      "name": "Schuster",
+      "team_id": 4,
+      "team_name": "BRE",
+      "position": "DEF",
+      "price": 4.5,
+      "predicted_points": 2.5108816499232356
+    },
+    {
+      "player_id": 94,
+      "name": "Schade",
+      "team_id": 4,
+      "team_name": "BRE",
+      "position": "MID",
+      "price": 6.2,
+      "predicted_points": 3.5283735163632595
+    },
+    {
+      "player_id": 124,
+      "name": "Gro\u00df",
+      "team_id": 5,
+      "team_name": "BHA",
+      "position": "MID",
+      "price": 5.9,
+      "predicted_points": 3.5062381529832303
+    },
+    {
+      "player_id": 138,
+      "name": "Kostoulas",
+      "team_id": 5,
+      "team_name": "BHA",
+      "position": "FWD",
+      "price": 5.6000000000000005,
+      "predicted_points": 3.6676988089297726
+    },
+    {
+      "player_id": 229,
+      "name": "Tarkowski",
+      "team_id": 9,
+      "team_name": "EVE",
+      "position": "DEF",
+      "price": 6.2,
+      "predicted_points": 2.5517845211108305
+    },
+    {
+      "player_id": 249,
+      "name": "Barry",
+      "team_id": 9,
+      "team_name": "EVE",
+      "position": "FWD",
+      "price": 5.7,
+      "predicted_points": 3.627878232144459
+    },
+    {
+      "player_id": 379,
+      "name": "Isak",
+      "team_id": 14,
+      "team_name": "LIV",
+      "position": "FWD",
+      "price": 9.1,
+      "predicted_points": 3.476022430567023
+    },
+    {
+      "player_id": 426,
+      "name": "B.Fernandes",
+      "team_id": 16,
+      "team_name": "MUN",
+      "position": "MID",
+      "price": 11.9,
+      "predicted_points": 3.172442387580961
+    },
+    {
+      "player_id": 428,
+      "name": "Cunha",
+      "team_id": 16,
+      "team_name": "MUN",
+      "position": "MID",
+      "price": 7.9,
+      "predicted_points": 3.044838197547192
+    },
+    {
+      "player_id": 504,
+      "name": "Vuskovic",
+      "team_id": 5,
+      "team_name": "BHA",
+      "position": "DEF",
+      "price": 5.0,
+      "predicted_points": 2.5086242344947984
+    }
+  ],
+  "bench": [
+    {
+      "player_id": 412,
+      "name": "Lammens",
+      "team_id": 16,
+      "team_name": "MUN",
+      "position": "GK",
+      "price": 4.9,
+      "predicted_points": 3.249292496757992
+    },
+    {
+      "player_id": 367,
+      "name": "Gakpo",
+      "team_id": 14,
+      "team_name": "LIV",
+      "position": "MID",
+      "price": 7.2,
+      "predicted_points": 2.9866429134943298
+    },
+    {
+      "player_id": 230,
+      "name": "Branthwaite",
+      "team_id": 9,
+      "team_name": "EVE",
+      "position": "DEF",
+      "price": 5.5,
+      "predicted_points": 2.4742295364491147
+    },
+    {
+      "player_id": 356,
+      "name": "Virgil",
+      "team_id": 14,
+      "team_name": "LIV",
+      "position": "DEF",
+      "price": 6.5,
+      "predicted_points": 2.2913012831908826
+    }
+  ],
+  "captain": {
+    "player_id": 572,
+    "name": "Tzolakis",
+    "team_id": 11,
+    "team_name": "HUL",
+    "position": "GK",
+    "price": 4.7,
+    "predicted_points": 4.0109632490311
+  },
+  "vice_captain": {
+    "player_id": 138,
+    "name": "Kostoulas",
+    "team_id": 5,
+    "team_name": "BHA",
+    "position": "FWD",
+    "price": 5.6000000000000005,
+    "predicted_points": 3.6676988089297726
+  }
+}
